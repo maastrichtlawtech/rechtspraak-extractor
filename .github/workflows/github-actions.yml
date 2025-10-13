@@ -3,10 +3,10 @@ name: Build, Test, Lint & Upload to TestPyPI and PyPI for Rechtspraak_Extractor
 on:
   push:
     branches: [ rechtspraak ]
+    tags:
+      - 'v*.*.*'
   pull_request:
     branches: [ rechtspraak ]
-env:
-  RELEASE_VERSION: 1.5.2
 
 jobs:
   lint:
@@ -77,7 +77,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools wheel build
+          pip install setuptools wheel build setuptools_scm
 
       - name: Build package
         run: |
@@ -114,7 +114,7 @@ jobs:
           packages-dir: dist/
 
   pypi-publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/rechtspraak'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
@@ -134,7 +134,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   github-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/rechtspraak'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     name: Sign the Python distribution with Sigstore and upload them to GitHub Releases
     needs:
       - pypi-publish
@@ -162,15 +162,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create \
-          'rechtspraak-extractor-${{ env.RELEASE_VERSION }}' \
+          '${{ github.ref_name }}' \
           --repo '${{ github.repository }}' \
-          --target 'rechtspraak' \
-          --notes ""
+          --generate-notes
 
       - name: Upload artifact signatures to Github release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload \
-          'rechtspraak-extractor-${{ env.RELEASE_VERSION }}' ./dist/*.tar.gz ./dist/*.whl \
+          '${{ github.ref_name }}' ./dist/*.tar.gz ./dist/*.whl \
           --repo '${{ github.repository }}'
