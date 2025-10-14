@@ -94,46 +94,32 @@ Python 3.9+
 
 
 ## Examples
-```
+```python
 import rechtspraak_extractor as rex
 
------------------------------------------------------------------------------------------------------------------------
+# Get rechtspraak data as a DataFrame (100 ECLIs since 2022-08-01)
+df = rex.get_rechtspraak(max_ecli=100, sd="2022-08-01", save_file="n")
 
-# For rechtspraak
-
-# To get the rechtspraak data in a dataframe:
-df = rex.get_rechtspraak(max_ecli=100, sd='2022-08-01', save_file='n')  # Gets 100 ECLIs from 1st August 2022
-
-# To save rechtspraak data as a CSV file:
-rex.get_rechtspraak(max_ecli=100, sd='2022-08-01', save_file='y') 
-
------------------------------------------------------------------------------------------------------------------------
-
-# For rechtspraak metadata
-
-# To get metadata as a dataframe from rechtspraak data (as a dataframe):
-df_metadata = rex.get_rechtspraak_metadata(save_file='n', dataframe=df)
-
-# To get metadata as a dataframe from rechtspraak file (as a dataframe):
-df_metadata = rex.get_rechtspraak_metadata(save_file='n', filename='rechtspraak.csv')
-
-# To get metadata as a dataframe from rechtspraak data (saved as CSV file):
-rex.get_rechtspraak_metadata(save_file='y', dataframe=df)
-
-# To get metadata and save as a CSV file:
-rex.get_rechtspraak_metadata(save_file='y', filename='rechtspraak.csv')
-
------------------------------------------------------------------------------------------------------------------------
-
-# filename='rechtspraak.csv' - filename.csv is a file from the data folder created by get_rechtspraak method
-# dataframe=df - df is a dataframe created by get_rechtspraak method
-
-# Will not get any metadata
-df = rex.get_rechtspraak_metadata(save_file='n')
-
-# Will get the metadata of all the files in the data folder
-rex.get_rechtspraak_metadata(save_file='y')
+# Save rechtspraak data directly to CSV in the data/ folder
+rex.get_rechtspraak(max_ecli=100, sd="2022-08-01", save_file="y")
 ```
+
+```python
+# Get metadata into a DataFrame from an existing DataFrame
+df_metadata = rex.get_rechtspraak_metadata(save_file="n", dataframe=df)
+
+# Get metadata into a DataFrame from a CSV produced by get_rechtspraak
+df_metadata = rex.get_rechtspraak_metadata(save_file="n", filename="rechtspraak.csv")
+
+# Produce metadata CSV from an in-memory DataFrame
+rex.get_rechtspraak_metadata(save_file="y", dataframe=df)
+
+# Produce metadata CSV from files already in data/ (processes all files)
+rex.get_rechtspraak_metadata(save_file="y")
+```
+
+- filename `rechtspraak.csv` refers to a file in the `data/` folder created by `get_rechtspraak`.
+- `df` is the DataFrame returned by `get_rechtspraak`.
 
 
 ## License
