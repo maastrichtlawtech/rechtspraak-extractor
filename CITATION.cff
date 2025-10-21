@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Rechtspraak Extractor"
+abstract: "Library for extracting rechtspraak data and metadata from the API"
+authors:
+  - family-names: "LawTech Lab"
+    email: "law-techlab@maastrichtuniversity.nl"
+    affiliation: "Maastricht University"
+repository-code: "https://github.com/maastrichtlawtech/rechtspraak-extractor"
+url: "https://github.com/maastrichtlawtech/rechtspraak-extractor"
+license: Apache-2.0
+keywords:
+  - rechtspraak
+  - extractor
+  - dutch-law
+  - legal-data
+  - ecli
+version: 1.5.3
+date-released: 2025-10-21
