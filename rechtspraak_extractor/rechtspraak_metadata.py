@@ -1,632 +1,655 @@
 # This file is used for getting the metadata of the ECLIs obtained using
-# rechspraak_api file. This file takes all the
-# CSV file created by rechspraak_api, picks up ECLIs and links column,
-# and using an API gets the metadata and saves it
+# rechtspraak_api file. This file takes all the CSV files created by rechtspraak_api,
+# picks up ECLIs and links column, and using an API gets the metadata and saves it
 # in another CSV file with metadata suffix.
-# This happens in async manner.
+
+from __future__ import annotations
 
 import logging
-import multiprocessing
 import os
-import pandas as pd
-import shutil
-import time
-import urllib
-import warnings
+import urllib.request
+import urllib.error
+from typing import Optional, Union
+from dataclasses import dataclass
+from enum import Enum
 
+import pandas as pd
+import time
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from functools import partial
 from fake_headers import Headers
 from pathlib import Path
 from rechtspraak_extractor.rechtspraak_functions import (
     read_csv,
     get_exe_time,
-    # check_api
 )
 from threading import Lock
 from tqdm import tqdm
 
 
-# Define base url
+# ============================================================================
+# CONSTANTS
+# ============================================================================
 RECHTSPRAAK_METADATA_API_BASE_URL = "https://data.rechtspraak.nl/uitspraken/content?id="
-# old one = "https://uitspraken.rechtspraak.nl/#!/details?id="
-return_type = "&return=DOC"
+API_RETURN_TYPE = "&return=DOC"
+MAX_RETRIES = 2
+DATE_FORMAT_YMD = "%Y%m%d"
+DATE_FORMAT_HMS = "%H-%M-%S"
+FAILED_ECLIS_FILENAME_PATTERN = "custom_rechtspraak_{date}_failed_eclis.txt"
+METADATA_CSV_SUFFIX = "_metadata.csv"
+DEFAULT_DATA_DIR = "data/raw/"
 
+METADATA_COLUMNS = [
+    "ecli",
+    "full_text",
+    "creator",
+    "date_decision",
+    "issued",
+    "zaaknummer",
+    "type",
+    "relations",
+    "references",
+    "subject",
+    "procedure",
+    "inhoudsindicatie",
+    "hasVersion",
+]
 
+METADATA_FIELD_MAPPING = {
+    "creator": "dcterms:creator",
+    "date_decision": "dcterms:date",
+    "issued": "dcterms:issued",
+    "zaaknummer": "psi:zaaknummer",
+    "type": "dcterms:type",
+    "subject": "dcterms:subject",
+    "relations": "dcterms:relation",
+    "references": "dcterms:references",
+    "procedure": "psi:procedure",
+    "inhoudsindicatie": "inhoudsindicatie",
+    "hasVersion": "dcterms:hasVersion",
+    "full_text": "uitspraak",
+}
+
+MULTIPLE_VALUE_FIELDS = {"relations", "references"}
+
+# Global lock for thread-safe file operations
+file_write_lock = Lock()
 progress_lock = Lock()
 
 
-def get_cores():
+# ============================================================================
+# TYPE DEFINITIONS
+# ============================================================================
+class SaveFileOption(Enum):
+    """Valid values for save_file parameter."""
+    YES = "y"
+    NO = "n"
+
+
+@dataclass
+class ExtractionResult:
+    """Result of metadata extraction operation."""
+    success: bool
+    data: Optional[pd.DataFrame] = None
+    failed_count: int = 0
+    total_count: int = 0
+
+
+
+
+def get_cores() -> int:
     """
-    Determines the number of logical CPU cores available on the machine and
-    sets the global variable `max_workers` to the number of cores minus one.
-    This is useful for configuring the maximum number of concurrent processes
-    or threads that can be run efficiently.
-
-    Notes:
-        - The `max_workers` value is calculated as the number of logical
-        CPU cores minus one, assuming the main process is computationally
-        intensive.
-        - The function logs the maximum number of threads supported
-        by the machine.
-
-    Global Variables:
-        max_workers (int): The maximum number of threads or processes
-        that can be used concurrently.
-
+    Determines the number of logical CPU cores available on the machine,
+    minus one (assuming the main process is computationally intensive).
+    
+    Returns:
+        int: The maximum number of worker threads to use (CPU count - 1).
+        
     Logging:
         Logs the calculated `max_workers` value as an informational message.
     """
-    n_cores = multiprocessing.cpu_count()
-
-    max_workers = n_cores - 1
-    # If the main process is computationally intensive: Set to the number of
-    # logical CPU cores minus one.
-
-    logging.info(
-        f"Maximum {str(max_workers)} threads supported by\
-                  your machine."
-    )
+    max_workers = max(1, os.cpu_count() - 1) if os.cpu_count() else 1
+    logging.info(f"Maximum {max_workers} threads supported by your machine.")
     return max_workers
 
 
-def check_file_in_directory(directory_path, file_name):
+def check_file_in_directory(directory_path: str, file_name: str) -> bool:
     """
     Checks if a specific file exists in the specified directory.
 
     Args:
-        directory_path (str): The path to the directory to check.
-        file_name (str): The name of the file to look for.
+        directory_path: The path to the directory to check.
+        file_name: The name of the file to look for.
 
     Returns:
-        bool: True if the file exists in the directory, False otherwise.
+        True if the file exists in the directory, False otherwise.
     """
     if not os.path.exists(directory_path):
-        logging.info(f"Directory '{directory_path}' does not exist.")
+        logging.debug(f"Directory '{directory_path}' does not exist.")
         return False
 
-    # Check if the specific file exists in the directory
     return os.path.isfile(os.path.join(directory_path, file_name))
 
 
-def extract_data_from_xml(url, fake_headers=False):
+def extract_data_from_xml(url: str, fake_headers: bool = False) -> Optional[bytes]:
     """
-    Fetches and returns the XML content from a given URL. The function attempts
-    to retrieve the XML file up to two times in case of errors.
+    Fetches and returns XML content from a given URL with retry logic.
+    
+    The function attempts to retrieve the XML file up to MAX_RETRIES times
+    in case of errors.
+
     Args:
-        url (str): The URL from which to fetch the XML content.
+        url: The URL from which to fetch the XML content.
+        fake_headers: Whether to use randomly generated headers (default: False).
+
     Returns:
-        bytes or None: The XML content as bytes if the request is successful,
-        or None if both attempts fail.
-    Raises:
-        Exception: Any exception encountered during the request is logged, but
-        not raised. The function will retry once before returning None.
+        The XML content as bytes if successful, None if all retries fail.
     """
-    if fake_headers:
-        _headers = Headers(headers=True).generate()
-    for attempt in range(2):  # Retry up to 2 times
+    headers = Headers(headers=True).generate() if fake_headers else None
+    
+    for attempt in range(MAX_RETRIES):
         try:
-            if fake_headers:
-                _request = urllib.request.Request(url, headers=_headers)
+            request = urllib.request.Request(url, headers=headers) if headers else urllib.request.Request(url)
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.read()
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
+            if attempt < MAX_RETRIES - 1:
+                logging.debug(f"Retry {attempt + 1}/{MAX_RETRIES} for URL {url}: {type(e).__name__}")
             else:
-                _request = urllib.request.Request(url)
-            with urllib.request.urlopen(_request) as response:
-                xml_file = response.read()
-                return xml_file
+                logging.debug(f"Failed to fetch {url} after {MAX_RETRIES} attempts: {type(e).__name__}")
         except Exception as e:
-            # Ignore exception logging as they can be too much
-            if attempt == 1:  # If it's the last attempt, return None
-                return None
+            logging.debug(f"Unexpected error fetching {url}: {e}")
+            
+    return None
 
 
-def check_if_df_empty(df):
-    if df.empty:
-        return True
-    return False
+def get_text_if_exists(element: BeautifulSoup, ecli: str) -> str:
+    """
+    Safely extracts text from a BeautifulSoup element.
+    
+    Returns empty string if element is None or text extraction fails.
 
+    Args:
+        element: The BeautifulSoup element to extract text from.
+        ecli: The ECLI for logging purposes.
 
-def get_text_if_exists(el, ecli):
+    Returns:
+        The text content, or empty string if not available.
+    """
     try:
-        return el.text
+        return element.text if element else ""
     except Exception as e:
-        # logging.log(
-        #     logging.WARNING,
-        #     f"An error occurred while getting\
-        #     the metadata of ECLI: {ecli} with error: {e} for tag: {el}",
-        # )
+        logging.debug(f"Error extracting text from element for ECLI {ecli}: {e}")
         return ""
 
 
-def update_bar(bar, *args):
-    with progress_lock:
-        bar.update(1)
-
-
-def save_data_when_crashed(ecli, data_dir="data/raw/"):
-    # Store it in a file
-    filename = (
-        "custom_rechtspraak_" + datetime.now().strftime("%Y%m%d") + "_failed_eclis.txt"
+def save_data_when_crashed(ecli: str, data_dir: str = DEFAULT_DATA_DIR) -> None:
+    """
+    Saves a failed ECLI to a file in a thread-safe manner.
+    
+    Args:
+        ecli: The ECLI identifier that failed.
+        data_dir: The directory where the failed ECLIs file is stored.
+    """
+    failed_eclis_filename = FAILED_ECLIS_FILENAME_PATTERN.format(
+        date=datetime.now().strftime(DATE_FORMAT_YMD)
     )
-    with open(
-        data_dir + filename,
-        "a",
-    ) as f:
-        f.write(ecli + "\n")
+    
+    with file_write_lock:  # Thread-safe file write
+        try:
+            file_path = Path(data_dir) / failed_eclis_filename
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(f"{ecli}\n")
+        except IOError as e:
+            logging.error(f"Failed to write failed ECLI {ecli} to file: {e}")
 
 
-def get_data_from_api(ecli_id, _columns, fake_headers=False, data_dir="data/raw/"):
-    url = f"{RECHTSPRAAK_METADATA_API_BASE_URL}{ecli_id}{return_type}"
+def process_metadata_fields(soup: BeautifulSoup, ecli_id: str) -> dict:
+    """
+    Extracts metadata fields from a BeautifulSoup object.
+    
+    Args:
+        soup: Parsed XML as BeautifulSoup object.
+        ecli_id: The ECLI identifier for logging.
+        
+    Returns:
+        Dictionary with extracted metadata fields.
+    """
+    metadata_dict = {}
+    
+    for field, tag in METADATA_FIELD_MAPPING.items():
+        element = soup.find(tag)
+        if element is not None:
+            if field in MULTIPLE_VALUE_FIELDS:
+                # Handle multiple values for relations and references
+                items = soup.find_all(tag)
+                values = [get_text_if_exists(item, ecli_id) for item in items]
+                value = "\n".join(v for v in values if v)
+            else:
+                value = get_text_if_exists(element, ecli_id)
+            
+            metadata_dict[field] = value
+    
+    return metadata_dict
+
+
+def report_failed_eclis(data_dir: str, file_name: Union[str, int] = "") -> tuple[bool, int]:
+    """
+    Reports summary of failed ECLIs after extraction.
+    
+    Args:
+        data_dir: The data directory path.
+        file_name: Optional file name (string) or ECLI count (int) for batch processing.
+        
+    Returns:
+        Tuple of (has_failures: bool, count: int)
+    """
+    failed_eclis_filename = FAILED_ECLIS_FILENAME_PATTERN.format(
+        date=datetime.now().strftime(DATE_FORMAT_YMD)
+    )
+    
+    if check_file_in_directory(data_dir, failed_eclis_filename):
+        file_path = Path(data_dir) / failed_eclis_filename
+        failed_count = file_path.read_text(encoding="utf-8").count("\n")
+        
+        file_suffix = f" from {Path(str(file_name)).stem}.csv" if isinstance(file_name, str) else ""
+        logging.warning(
+            f"FAILED: {failed_count} ECLI(s){file_suffix} failed to fetch metadata "
+            f"from the API after attempting retries.\nFailed ECLI(s) are stored in: "
+            f"{file_path}\nPlease review and retry or contact the administrator."
+        )
+        return True, failed_count
+    else:
+        total_eclis = file_name if isinstance(file_name, int) else "all"
+        logging.info(f"SUCCESS: All {total_eclis} ECLI(s) have been processed successfully with 0 failures.")
+        return False, 0
+
+
+def fetch_eclis_in_parallel(
+    ecli_list: list[str],
+    columns: list[str],
+    fake_headers: bool = False,
+    data_dir: str = DEFAULT_DATA_DIR,
+) -> pd.DataFrame:
+    """
+    Fetches metadata for multiple ECLIs in parallel using thread pool.
+    
+    Args:
+        ecli_list: List of ECLI identifiers to fetch.
+        columns: Column names for the result DataFrame.
+        fake_headers: Whether to use fake headers for requests.
+        data_dir: The data directory for storing failed ECLIs.
+        
+    Returns:
+        DataFrame with fetched metadata (may be empty if all failed).
+    """
+    max_workers = get_cores()
+    thread_results = []
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with tqdm(
+            total=len(ecli_list),
+            colour="GREEN",
+            position=0,
+            leave=True,
+            miniters=max(1, len(ecli_list) // 100),
+            maxinterval=10000,
+        ) as progress_bar:
+            futures = {
+                executor.submit(
+                    get_data_from_api,
+                    ecli_id=ecli,
+                    columns=columns,
+                    fake_headers=fake_headers,
+                    data_dir=data_dir,
+                ): ecli
+                for ecli in ecli_list
+            }
+            
+            for future in futures:
+                try:
+                    row_data = future.result()
+                    if row_data:
+                        thread_results.append(pd.DataFrame([row_data], columns=columns))
+                except Exception as e:
+                    logging.error(f"Error processing future: {e}")
+                finally:
+                    progress_bar.update(1)
+    
+    return pd.concat(thread_results, ignore_index=True) if thread_results else pd.DataFrame(columns=columns)
+
+
+def get_data_from_api(
+    ecli_id: str,
+    columns: list[str],
+    fake_headers: bool = False,
+    data_dir: str = DEFAULT_DATA_DIR,
+) -> Optional[list]:
+    """
+    Fetches metadata for a single ECLI from the Rechtspraak API.
+
+    Args:
+        ecli_id: The ECLI identifier.
+        columns: Expected column names for the result.
+        fake_headers: Whether to use fake headers for the request.
+        data_dir: The data directory for storing failed ECLIs.
+
+    Returns:
+        List of row data matching the columns, or None if extraction fails.
+    """
+    url = f"{RECHTSPRAAK_METADATA_API_BASE_URL}{ecli_id}{API_RETURN_TYPE}"
+    
     try:
-        # Extract data from xml
         xml_object = extract_data_from_xml(url, fake_headers=fake_headers)
         if xml_object is None:
-            logging.warning(f"Failed to fetch XML content for ECLI: {ecli_id}")
+            logging.debug(
+                f"Failed to fetch XML content for ECLI: {ecli_id} after "
+                f"attempting {MAX_RETRIES} retries"
+            )
             save_data_when_crashed(ecli_id, data_dir)
             return None
+        
         soup = BeautifulSoup(xml_object, features="xml")
-        metadata_fields = {
-            "creator": "dcterms:creator",
-            "date_decision": "dcterms:date",
-            "issued": "dcterms:issued",
-            "zaaknummer": "psi:zaaknummer",
-            "type": "dcterms:type",
-            "subject": "dcterms:subject",
-            "relations": "dcterms:relation",
-            "references": "dcterms:references",
-            "procedure": "psi:procedure",
-            "inhoudsindicatie": "inhoudsindicatie",
-            "hasVersion": "dcterms:hasVersion",
-            "full_text": "uitspraak",
-        }
-        metadata_dict = {}
-        for field, tag in metadata_fields.items():
-            if soup.find(tag) is not None:
-                value = get_text_if_exists(soup.find(tag), ecli_id)
-                if field == "relations" or field == "references":
-                    # Handle multiple values for relations
-                    # and references
-                    items = soup.find_all(tag)
-                    combined_value = ""
-                    for item in items:
-                        text = get_text_if_exists(item, ecli_id)
-                        if text:
-                            combined_value += text + "\n"
-                    value = combined_value.strip()
-                metadata_dict[field] = value
-        # Append the dataframe temp_df with the metadata
+        metadata_dict = process_metadata_fields(soup, ecli_id)
+        
+        # Add ECLI and ensure all expected columns exist
         metadata_dict["ecli"] = ecli_id
-        metadata_dict = {col: metadata_dict.get(col, "") for col in _columns}
-        row_data = [metadata_dict[col] for col in _columns]
-        if len(row_data) != len(_columns):
+        metadata_dict = {col: metadata_dict.get(col, "") for col in columns}
+        row_data = [metadata_dict[col] for col in columns]
+        
+        if len(row_data) != len(columns):
             logging.error(
-                f"Row data length ({len(row_data)}) does not match the number of columns ({len(_columns)})."
+                f"Row data length ({len(row_data)}) does not match "
+                f"expected columns ({len(columns)}) for ECLI {ecli_id}."
             )
             return None
-        del metadata_dict
-        urllib.request.urlcleanup()
+        
         return row_data
+        
     except Exception as e:
-        logging.warning(
-            f"An error occurred while getting the metadata of ECLI: {ecli_id}\
-                with error: {e}"
+        logging.debug(
+            f"Error extracting metadata for ECLI {ecli_id}: {type(e).__name__}: {e}. "
+            f"ECLI will be marked as failed."
         )
         save_data_when_crashed(ecli_id, data_dir)
         return None
 
 
 def get_rechtspraak_metadata(
-    save_file="n",
-    dataframe=None,
-    filename=None,
-    _fake_headers=False,
-    multi_threading=True,
-    data_dir="data/raw/",
-):
+    save_file: str = SaveFileOption.NO.value,
+    dataframe: Optional[pd.DataFrame] = None,
+    filename: Optional[str] = None,
+    _fake_headers: bool = False,
+    multi_threading: bool = True,
+    data_dir: str = DEFAULT_DATA_DIR,
+) -> Union[bool, pd.DataFrame]:
     """
-    Extracts metadata from the Rechtspraak API for a given dataset or file and
-    optionally saves the results.
-    Parameters:
-        save_file (str, optional): Determines whether to save the metadata
-        to a file. Accepts "y" (yes) or "n" (no). Default is "n".
-        dataframe (pd.DataFrame, optional): A pandas DataFrame containing
-        the data to extract metadata from. Must include columns "id" and
-        "link".
-        filename (str, optional): The name of the CSV file (located in the
-        "data" folder) to extract metadata from. The file must include
-        columns "id" and "link".
-        _fake_headers (bool, optional): Internal flag to use fake headers
-        for API requests. Default is False. Please use this responsibly
-        as hammering a public domain resource is not nice/advisable.
+    Extracts metadata from the Rechtspraak API for a given dataset or file.
+
+    Args:
+        save_file: Save to file? 'y' (yes) or 'n' (no). Default: 'n'.
+        dataframe: Optional DataFrame with "id" and "link" columns.
+        filename: Optional CSV filename in data_dir with "id" and "link" columns.
+        _fake_headers: Use fake headers for API requests (use responsibly).
+        multi_threading: Enable multithreading (default: True).
+        data_dir: Directory path for data files (default: "data/raw/").
+
     Returns:
-        bool or pd.DataFrame:
-            - Returns False if there are errors or if metadata extraction
-            is not possible.
-            - Returns a pandas DataFrame containing the metadata if `save_file`
-            is "n" and metadata extraction is successful.
-            - Returns True if metadata is successfully extracted and saved
-            to a file.
+        - DataFrame if save_file="n" and extraction succeeds.
+        - True if save_file="y" and extraction succeeds.
+        - False if there are errors or inputs are invalid.
+
     Raises:
-        ValueError: If both `dataframe` and `filename` are provided,
-        or neither is provided when `save_file` is "n".
+        ValueError: If both dataframe and filename are provided, or if neither
+        is provided when save_file="n".
+
     Notes:
-        - If `save_file` is "y" and no `dataframe` or `filename` is provided,
-        metadata will be extracted for all CSV files in the "data" folder.
-        - Metadata is saved as a CSV file in the "data" folder with the
-        suffix "_metadata.csv".
-        - Failed ECLIs (European Case Law Identifiers) are logged and saved
-        to a file with the suffix "_failed_eclis.txt".
-        - The function uses multithreading to fetch metadata from the API
-        for better performance.
-        - Temporary files and directories are created during execution and
-        cleaned up afterward.
-    Logging:
-        - Logs various stages of the metadata extraction process, including
-        warnings, errors, and progress updates.
-    Example Usage:
-        # Extract metadata from a DataFrame
-        result = get_rechtspraak_metadata(dataframe=my_dataframe,
-                                          save_file="n")
-        # Extract metadata from a file and save it
-        get_rechtspraak_metadata(filename="example.csv", save_file="y")
-        # Extract metadata for all files in the "data" folder and save them
+        - If save_file="y" and neither dataframe nor filename is provided,
+          metadata will be extracted for all CSV files in data_dir.
+        - Failed ECLIs are logged and saved to "_failed_eclis.txt".
+        - Uses multithreading for better performance.
+
+    Example:
+        # From DataFrame
+        result = get_rechtspraak_metadata(dataframe=df, save_file="n")
+
+        # From file
+        get_rechtspraak_metadata(filename="data.csv", save_file="y")
+
+        # All files in directory
         get_rechtspraak_metadata(save_file="y")
     """
-    _columns = [
-        "ecli",
-        "full_text",
-        "creator",
-        "date_decision",
-        "issued",
-        "zaaknummer",
-        "type",
-        "relations",
-        "references",
-        "subject",
-        "procedure",
-        "inhoudsindicatie",
-        "hasVersion",
-    ]
-    temp_df = pd.DataFrame(columns=_columns)
+    # Input validation
     if dataframe is not None and filename is not None:
-        logging.warning(
-            "Please provide either a dataframe or a filename,\
-                         but not both"
-        )
+        logging.error("Provide either dataframe or filename, not both.")
         return False
 
-    if dataframe is None and filename is None and save_file == "n":
-        logging.warning(
-            'Please provide at least a dataframe of filename\
-                        when the save_file is "n"'
-        )
+    if dataframe is None and filename is None and save_file == SaveFileOption.NO.value:
+        logging.error("Provide dataframe or filename when save_file='n'.")
+        return False
+
+    if save_file not in (SaveFileOption.YES.value, SaveFileOption.NO.value):
+        logging.error(f"save_file must be 'y' or 'n', got '{save_file}'.")
         return False
 
     logging.info("Starting extraction with Rechtspraak metadata API")
-    start_time = time.time()  # Get start time
-    no_of_rows = ""
-    rs_data = ""
-    csv_files = 0
+    start_time = time.time()
+    data_dir = str(Path(data_dir))  # Normalize path
 
-    # Check if filename is provided and is correct
+    # Process single file or dataframe
+    if filename is not None or dataframe is not None:
+        return _process_single_source(
+            dataframe=dataframe,
+            filename=filename,
+            save_file=save_file,
+            fake_headers=_fake_headers,
+            data_dir=data_dir,
+            start_time=start_time,
+        )
+
+    # Process all files in directory
+    if save_file == SaveFileOption.YES.value:
+        return _process_all_files_in_directory(
+            data_dir=data_dir,
+            fake_headers=_fake_headers,
+            start_time=start_time,
+        )
+
+    return False
+
+
+def _validate_data_source(data: pd.DataFrame, source_name: str = "DataFrame") -> bool:
+    """
+    Validates that a DataFrame has required columns.
+
+    Args:
+        data: The DataFrame to validate.
+        source_name: Name of the source for logging.
+
+    Returns:
+        True if valid, False otherwise.
+    """
+    if data.empty:
+        logging.error(f"{source_name} is empty.")
+        return False
+
+    if "id" not in data.columns or "link" not in data.columns:
+        logging.error(f"{source_name} missing required 'id' or 'link' columns.")
+        logging.debug(f"Available columns: {data.columns.tolist()}")
+        return False
+
+    return True
+
+
+def _process_single_source(
+    dataframe: Optional[pd.DataFrame],
+    filename: Optional[str],
+    save_file: str,
+    fake_headers: bool,
+    data_dir: str,
+    start_time: float,
+) -> Union[bool, pd.DataFrame]:
+    """
+    Process metadata extraction for a single source (file or dataframe).
+
+    Args:
+        dataframe: Optional input DataFrame.
+        filename: Optional input filename.
+        save_file: Whether to save to file.
+        fake_headers: Use fake headers for requests.
+        data_dir: Data directory path.
+        start_time: Start time for execution timing.
+
+    Returns:
+        DataFrame if save_file="n", True if save_file="y", False on error.
+    """
+    # Load data
     if filename is not None:
-        logging.info("Reading " + filename + " from data folder")
-        file_check = Path(data_dir + filename)
-        if file_check.is_file():
-            logging.info("File found. Checking if metadata already exists")
-            # Check if metadata already exists
-            file_check = Path(
-                data_dir
-                + filename.split("/")[-1][: len(filename.split("/")[-1]) - 4]
-                + "_metadata.csv"
-            )
-            if file_check.is_file():
-                logging.info(
-                    "Metadata for "
-                    + filename.split("/")[-1][: len(filename.split("/")[-1]) - 4]
-                    + ".csv already exists."
-                )
-                return False
-            else:
-                rs_data = pd.read_csv(data_dir + filename)
-                if "id" in rs_data and "link" in rs_data:
-                    no_of_rows = rs_data.shape[0]
-                else:
-                    logging.warning(
-                        "File is corrupted or does not contain\
-                                    necessary information to get the metadata."
-                    )
-                    return False
-        else:
-            logging.info("File not found. Please check the file name.")
+        file_path = Path(data_dir) / filename
+        
+        if not file_path.exists():
+            logging.error(f"File not found: {file_path}")
             return False
-    if multi_threading:
-        max_workers = get_cores()  # Get number of cores supported by the CPU
+
+        data = pd.read_csv(file_path)
+        source_name = f"File '{filename}'"
     else:
-        max_workers = 1
-        logging.info("Multi-threading is disabled. Using single-threaded mode.")
-    if dataframe is None and filename is None and save_file == "y":
-        logging.info(
-            "No dataframe or file name is provided. Getting the metadata\
-                of all the files present in the data folder"
+        data = dataframe
+        source_name = "DataFrame"
+
+    if not _validate_data_source(data, source_name):
+        return False
+
+    # Check if metadata already exists
+    if filename is not None:
+        output_path = Path(data_dir) / (Path(filename).stem + METADATA_CSV_SUFFIX)
+        if output_path.exists():
+            logging.info(f"Metadata already exists: {output_path}")
+            return False
+
+    logging.info(f"Processing {len(data)} ECLIs...")
+    num_eclis = len(data)
+    ecli_list = data["id"].tolist()
+
+    # Fetch metadata
+    metadata_df = fetch_eclis_in_parallel(
+        ecli_list=ecli_list,
+        columns=METADATA_COLUMNS,
+        fake_headers=fake_headers,
+        data_dir=data_dir,
+    )
+
+    # Merge with original data
+    if not metadata_df.empty:
+        metadata_df = metadata_df.merge(
+            data[["id", "summary"]],
+            how="left",
+            left_on="ecli",
+            right_on="id",
+        ).drop("id", axis=1)
+
+    # Handle empty results
+    if metadata_df.empty:
+        logging.warning(
+            "Metadata not found. Check if API is available or has changed. "
+            "Please try again or contact the administrator."
         )
 
-        logging.info("Reading all CSV files in the data folder...")
-        csv_files = read_csv(data_dir, "metadata")
+    # Save to file if requested
+    if save_file == SaveFileOption.YES.value:
+        Path(data_dir).mkdir(parents=True, exist_ok=True)
 
-        if len(csv_files) > 0:
-            for f in csv_files:
-                # Create empty dataframe
-                rsm_df = pd.DataFrame(columns=_columns)
-                temp_file_name = os.path.basename(f).replace(".csv", "")
-
-                # Check if file already exists
-                file_check = Path(data_dir + temp_file_name + "_metadata.csv")
-                if file_check.is_file():
-                    logging.info(
-                        f"Metadata for {temp_file_name}.csv\
-                                 already exists."
-                    )
-                    continue
-
-                rs_data = pd.read_csv(f)
-                no_of_rows = rs_data.shape[0]
-                logging.info(
-                    "Getting metadata of "
-                    + str(no_of_rows)
-                    + " ECLIs from "
-                    + temp_file_name
-                    + ".csv"
-                )
-                logging.info("Working. Please wait...")
-
-                if rs_data.empty:
-                    logging.error(
-                        "The DataFrame is empty. Please check the input data."
-                    )
-                    return False
-
-                logging.info(
-                    f"Available columns in the DataFrame:\
-                        {rs_data.columns.tolist()}"
-                )
-                if "id" not in rs_data.columns:
-                    logging.info(
-                        f"it is not empty but has columns\
-                           {rs_data.columns.tolist()}"
-                    )
-                    logging.error(
-                        "'id' column is missing in the DataFrame.\
-                              Please check the input data."
-                    )
-                    return False
-
-                # Get all ECLIs in a list
-                ecli_list = list(rs_data.loc[:, "id"])
-
-                # Create a temporary directory to save files
-                time.sleep(1)
-                # Path("temp_rs_data").mkdir(parents=True, exist_ok=True)
-                thread_results = []
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    with tqdm(
-                        total=len(ecli_list),
-                        colour="GREEN",
-                        position=0,
-                        leave=True,
-                        miniters=int(len(ecli_list) / 100),
-                        maxinterval=10000,
-                    ) as bar:
-                        futures = {
-                            executor.submit(
-                                get_data_from_api,
-                                ecli_id=ecli,
-                                _columns=_columns,
-                                fake_headers=_fake_headers,
-                                data_dir=data_dir,
-                            ): ecli
-                            for ecli in ecli_list
-                        }
-                    for future in futures:
-                        try:
-                            row_data = future.result()
-                            if row_data:
-                                thread_results.append(
-                                    pd.DataFrame([row_data], columns=_columns)
-                                )
-                            bar.update(1)
-                        except Exception as e:
-                            logging.warning(
-                                f"An error occurred while processing ECLI: {e}"
-                            )
-                            bar.update(1)
-                if thread_results:
-                    temp_df = pd.concat(thread_results, ignore_index=True)
-                else:
-                    temp_df = pd.DataFrame(columns=_columns)
-                # try:
-                #     # Delete temporary directory if it exists
-                #     if os.path.exists("temp_rs_data"):
-                #         shutil.rmtree("temp_rs_data")
-                # except Exception as e:
-                #     logging.info(
-                #         f"An error occurred while deleting temp directory: {e}"
-                #     )
-                #     # Nothing to do here
-
-                # executor.shutdown()  # Shutdown the executor
-                rsm_df = temp_df
-                addition = rs_data[["id", "summary"]]
-                rsm_df = rsm_df.merge(
-                    addition, how="left", left_on="ecli", right_on="id"
-                ).drop(["id"], axis=1)
-                # Create directory if not exists
-                Path(data_dir).mkdir(parents=True, exist_ok=True)
-
-                if check_if_df_empty(rsm_df):
-                    logging.warning(
-                        "Metadata not found. Please check the API response;\
-                            either API is under maintenance, "
-                        "experiencing problems, or has changed.\
-                                Please try again after some time or contact the "
-                        "administrator.\n"
-                    )
-                else:
-                    # Save CSV file
-                    logging.info("Creating CSV file...")
-                    rsm_df.to_csv(
-                        data_dir + temp_file_name + "_metadata.csv",
-                        index=False,
-                        encoding="utf8",
-                    )
-                    logging.info(
-                        "CSV file "
-                        + temp_file_name
-                        + "_metadata.csv  successfully created.\n"
-                    )
-                del rsm_df, temp_df
-                failed_ecli_filename = (
-                    "custom_rechtspraak_"
-                    + datetime.now().strftime("%Y%m%d")
-                    + "_failed_eclis.txt"
-                )
-                if check_file_in_directory(data_dir, failed_ecli_filename):
-                    with open(data_dir + failed_ecli_filename, "r") as f:
-                        failed_ecli_count = len(f.readlines())
-                    logging.info(
-                        f"Total {failed_ecli_count} ECLIs failed to fetch\
-                            metadata from the API. Please check the log file."
-                    )
-                else:
-                    logging.info(
-                        "No failed ECLIs found.\
-                            All ECLIs have been processed successfully."
-                    )
-
-            return True
-
-    else:
-        # Check if dataframe is provided and is correct
-        if dataframe is not None:
-            if "id" in dataframe and "link" in dataframe:
-                rs_data = dataframe
-                no_of_rows = rs_data.shape[0]
-            else:
-                logging.info(
-                    "Dataframe is corrupted or does not contain\
-                        necessary information to get the metadata."
-                )
-                return False
-        rsm_df = pd.DataFrame(columns=_columns)
-        logging.info("Getting metadata of " + str(no_of_rows) + " ECLIs")
-        logging.info("Working. Please wait...")
-        # Get all ECLIs in a list
-        ecli_list = list(rs_data.loc[:, "id"])
-
-        # Create a temporary directory to save files
-        # Path("temp_rs_data").mkdir(parents=True, exist_ok=True)
-        time.sleep(1)
-        thread_results = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            with tqdm(
-                total=len(ecli_list),
-                colour="GREEN",
-                position=0,
-                leave=True,
-                miniters=int(len(ecli_list) / 100),
-                maxinterval=10000,
-            ) as bar:
-                futures = {
-                    executor.submit(
-                        get_data_from_api,
-                        ecli_id=ecli,
-                        _columns=_columns,
-                        fake_headers=_fake_headers,
-                    ): ecli
-                    for ecli in ecli_list
-                }
-                for future in futures:
-                    try:
-                        row_data = future.result()
-                        if row_data:
-                            thread_results.append(
-                                pd.DataFrame([row_data], columns=_columns)
-                            )
-                        bar.update(1)
-                    except Exception as e:
-                        logging.warning(f"An error occurred while processing ECLI: {e}")
-                        bar.update(1)
-        if thread_results:
-            temp_df = pd.concat(thread_results, ignore_index=True)
+        if filename:
+            output_file = Path(data_dir) / (Path(filename).stem + METADATA_CSV_SUFFIX)
         else:
-            temp_df = pd.DataFrame(columns=_columns)
-        # try:
-        #     # Delete temporary directory
-        #     if os.path.exists("temp_rs_data"):
-        #         shutil.rmtree("temp_rs_data")
-        #         # to finish unfinished?
-        # except Exception as e:
-        #     logging.info(f"An error occurred while deleting temp directory: {e}")
-        #     # Nothing to do here
-        rsm_df = temp_df
-        addition = rs_data[["id", "summary"]]
-        rsm_df = rsm_df.merge(addition, how="left", left_on="ecli", right_on="id").drop(
-            ["id"], axis=1
-        )
-        if save_file == "y":
-            if filename is None or filename == "":
-                filename = (
-                    "custom_rechtspraak_" + datetime.now().strftime("%H-%M-%S") + ".csv"
-                )
-            # Create directory if not exists
-            Path(data_dir).mkdir(parents=True, exist_ok=True)
+            output_file = Path(data_dir) / (f"custom_rechtspraak_{datetime.now().strftime(DATE_FORMAT_HMS)}.csv")
 
-            if check_if_df_empty(rsm_df):
-                logging.warning(
-                    "Metadata not found. Please check the API response;\
-                        either API is under maintenance, "
-                    "experiencing problems, or has changed.\
-                          Please try again after some time or contact the "
-                    "administrator.\n"
-                )
-            else:
-                # Save CSV file
-                logging.info("Creating CSV file...")
-                rsm_df.to_csv(
-                    data_dir
-                    + filename.split("/")[-1][: len(filename.split("/")[-1]) - 4]
-                    + "_metadata.csv",
-                    index=False,
-                    encoding="utf8",
-                )
-                logging.info(
-                    "CSV file "
-                    + filename.split("/")[-1][: len(filename.split("/")[-1]) - 4]
-                    + "_metadata.csv"
-                    + " successfully created.\n"
-                )
-        get_exe_time(start_time)
-        failed_ecli_filename = (
-            "custom_rechtspraak_"
-            + datetime.now().strftime("%Y%m%d")
-            + "_failed_eclis.txt"
-        )
-        if check_file_in_directory(data_dir, failed_ecli_filename):
-            with open(data_dir + failed_ecli_filename, "r") as f:
-                failed_ecli_count = len(f.readlines())
-            logging.info(
-                f"Total {failed_ecli_count} ECLIs failed to fetch\
-                    metadata from the API. Please check the log file."
-            )
-        else:
-            logging.info(
-                "No failed ECLIs found.\
-                    All ECLIs have been processed successfully."
-            )
+        metadata_df.to_csv(output_file, index=False, encoding="utf-8")
+        logging.info(f"Metadata saved to: {output_file}")
 
-        if save_file == "n":
-            return rsm_df
-        del temp_df
+    get_exe_time(start_time)
+    report_failed_eclis(data_dir, filename or num_eclis)
 
+    return metadata_df if save_file == SaveFileOption.NO.value else True
+
+
+def _process_all_files_in_directory(
+    data_dir: str,
+    fake_headers: bool,
+    start_time: float,
+) -> bool:
+    """
+    Process metadata extraction for all CSV files in a directory.
+
+    Args:
+        data_dir: The data directory path.
+        fake_headers: Use fake headers for requests.
+        start_time: Start time for execution timing.
+
+    Returns:
+        True if all files processed successfully, False on error.
+    """
+    csv_files = read_csv(data_dir, "metadata")
+
+    if not csv_files:
+        logging.warning("No CSV files found in data directory.")
         return True
+
+    logging.info(f"Processing {len(csv_files)} files...")
+
+    for file_path in csv_files:
+        file_name = Path(file_path).name
+        file_stem = Path(file_path).stem
+
+        # Check if metadata already exists
+        output_path = Path(data_dir) / (file_stem + METADATA_CSV_SUFFIX)
+        if output_path.exists():
+            logging.info(f"Metadata already exists: {file_stem}{METADATA_CSV_SUFFIX}")
+            continue
+
+        try:
+            data = pd.read_csv(file_path)
+            
+            if not _validate_data_source(data, f"File '{file_name}'"):
+                continue
+
+            logging.info(f"Processing {len(data)} ECLIs from {file_name}...")
+            ecli_list = data["id"].tolist()
+
+            # Fetch metadata
+            metadata_df = fetch_eclis_in_parallel(
+                ecli_list=ecli_list,
+                columns=METADATA_COLUMNS,
+                fake_headers=fake_headers,
+                data_dir=data_dir,
+            )
+
+            # Merge with original data
+            if not metadata_df.empty:
+                metadata_df = metadata_df.merge(
+                    data[["id", "summary"]],
+                    how="left",
+                    left_on="ecli",
+                    right_on="id",
+                ).drop("id", axis=1)
+
+            # Save to file
+            if not metadata_df.empty:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                metadata_df.to_csv(output_path, index=False, encoding="utf-8")
+                logging.info(f"Saved: {output_path}")
+            else:
+                logging.warning(
+                    f"No metadata retrieved for {file_name}. Check API status."
+                )
+
+            # Report failed ECLIs
+            report_failed_eclis(data_dir, file_name)
+
+        except Exception as e:
+            logging.error(f"Error processing {file_name}: {e}")
+            continue
+
+    get_exe_time(start_time)
+    return True
