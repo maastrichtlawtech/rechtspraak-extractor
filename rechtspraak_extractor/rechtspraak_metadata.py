@@ -37,6 +37,7 @@ MAX_RETRIES = 2
 DATE_FORMAT_YMD = "%Y%m%d"
 DATE_FORMAT_HMS = "%H-%M-%S"
 FAILED_ECLIS_FILENAME_PATTERN = "custom_rechtspraak_{date}_failed_eclis.txt"
+NO_METADATA_ECLIS_FILENAME_PATTERN = "custom_rechtspraak_{date}_no_metadata_eclis.txt"
 METADATA_CSV_SUFFIX = "_metadata.csv"
 DEFAULT_DATA_DIR = "data/raw/"
 
@@ -83,6 +84,7 @@ progress_lock = Lock()
 # ============================================================================
 class SaveFileOption(Enum):
     """Valid values for save_file parameter."""
+
     YES = "y"
     NO = "n"
 
@@ -90,22 +92,21 @@ class SaveFileOption(Enum):
 @dataclass
 class ExtractionResult:
     """Result of metadata extraction operation."""
+
     success: bool
     data: Optional[pd.DataFrame] = None
     failed_count: int = 0
     total_count: int = 0
 
 
-
-
 def get_cores() -> int:
     """
     Determines the number of logical CPU cores available on the machine,
     minus one (assuming the main process is computationally intensive).
-    
+
     Returns:
         int: The maximum number of worker threads to use (CPU count - 1).
-        
+
     Logging:
         Logs the calculated `max_workers` value as an informational message.
     """
@@ -135,7 +136,7 @@ def check_file_in_directory(directory_path: str, file_name: str) -> bool:
 def extract_data_from_xml(url: str, fake_headers: bool = False) -> Optional[bytes]:
     """
     Fetches and returns XML content from a given URL with retry logic.
-    
+
     The function attempts to retrieve the XML file up to MAX_RETRIES times
     in case of errors.
 
@@ -147,27 +148,35 @@ def extract_data_from_xml(url: str, fake_headers: bool = False) -> Optional[byte
         The XML content as bytes if successful, None if all retries fail.
     """
     headers = Headers(headers=True).generate() if fake_headers else None
-    
+
     for attempt in range(MAX_RETRIES):
         try:
-            request = urllib.request.Request(url, headers=headers) if headers else urllib.request.Request(url)
+            request = (
+                urllib.request.Request(url, headers=headers)
+                if headers
+                else urllib.request.Request(url)
+            )
             with urllib.request.urlopen(request, timeout=10) as response:
                 return response.read()
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
             if attempt < MAX_RETRIES - 1:
-                logging.debug(f"Retry {attempt + 1}/{MAX_RETRIES} for URL {url}: {type(e).__name__}")
+                logging.debug(
+                    f"Retry {attempt + 1}/{MAX_RETRIES} for URL {url}: {type(e).__name__}"
+                )
             else:
-                logging.debug(f"Failed to fetch {url} after {MAX_RETRIES} attempts: {type(e).__name__}")
+                logging.debug(
+                    f"Failed to fetch {url} after {MAX_RETRIES} attempts: {type(e).__name__}"
+                )
         except Exception as e:
             logging.debug(f"Unexpected error fetching {url}: {e}")
-            
+
     return None
 
 
 def get_text_if_exists(element: BeautifulSoup, ecli: str) -> str:
     """
     Safely extracts text from a BeautifulSoup element.
-    
+
     Returns empty string if element is None or text extraction fails.
 
     Args:
@@ -187,7 +196,7 @@ def get_text_if_exists(element: BeautifulSoup, ecli: str) -> str:
 def save_data_when_crashed(ecli: str, data_dir: str = DEFAULT_DATA_DIR) -> None:
     """
     Saves a failed ECLI to a file in a thread-safe manner.
-    
+
     Args:
         ecli: The ECLI identifier that failed.
         data_dir: The directory where the failed ECLIs file is stored.
@@ -195,7 +204,7 @@ def save_data_when_crashed(ecli: str, data_dir: str = DEFAULT_DATA_DIR) -> None:
     failed_eclis_filename = FAILED_ECLIS_FILENAME_PATTERN.format(
         date=datetime.now().strftime(DATE_FORMAT_YMD)
     )
-    
+
     with file_write_lock:  # Thread-safe file write
         try:
             file_path = Path(data_dir) / failed_eclis_filename
@@ -205,19 +214,44 @@ def save_data_when_crashed(ecli: str, data_dir: str = DEFAULT_DATA_DIR) -> None:
             logging.error(f"Failed to write failed ECLI {ecli} to file: {e}")
 
 
-def process_metadata_fields(soup: BeautifulSoup, ecli_id: str) -> dict:
+def save_no_metadata_ecli(ecli: str, data_dir: str = DEFAULT_DATA_DIR) -> None:
+    """
+    Saves an ECLI with no metadata to a file in a thread-safe manner.
+
+    When an ECLI is successfully accessed but contains no metadata fields,
+    it is recorded separately from failed ECLIs (which indicate access/network issues).
+
+    Args:
+        ecli: The ECLI identifier that has no metadata.
+        data_dir: The directory where the no-metadata ECLIs file is stored.
+    """
+    no_metadata_filename = NO_METADATA_ECLIS_FILENAME_PATTERN.format(
+        date=datetime.now().strftime(DATE_FORMAT_YMD)
+    )
+
+    with file_write_lock:  # Thread-safe file write
+        try:
+            file_path = Path(data_dir) / no_metadata_filename
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(f"{ecli}\n")
+        except IOError as e:
+            logging.error(f"Failed to write no-metadata ECLI {ecli} to file: {e}")
+
+
+def process_metadata_fields(soup: BeautifulSoup, ecli_id: str) -> tuple[dict, bool]:
     """
     Extracts metadata fields from a BeautifulSoup object.
-    
+
     Args:
         soup: Parsed XML as BeautifulSoup object.
         ecli_id: The ECLI identifier for logging.
-        
+
     Returns:
-        Dictionary with extracted metadata fields.
+        Tuple of (metadata_dict, has_metadata) where has_metadata is True
+        if at least one metadata field was found.
     """
     metadata_dict = {}
-    
+
     for field, tag in METADATA_FIELD_MAPPING.items():
         element = soup.find(tag)
         if element is not None:
@@ -228,32 +262,40 @@ def process_metadata_fields(soup: BeautifulSoup, ecli_id: str) -> dict:
                 value = "\n".join(v for v in values if v)
             else:
                 value = get_text_if_exists(element, ecli_id)
-            
+
             metadata_dict[field] = value
-    
-    return metadata_dict
+
+    # Check if any actual metadata was extracted (excluding empty values)
+    has_metadata = any(metadata_dict.values())
+    return metadata_dict, has_metadata
 
 
-def report_failed_eclis(data_dir: str, file_name: Union[str, int] = "") -> tuple[bool, int]:
+def report_failed_eclis(
+    data_dir: str, file_name: Union[str, int] = ""
+) -> tuple[bool, int]:
     """
     Reports summary of failed ECLIs after extraction.
-    
+
     Args:
         data_dir: The data directory path.
         file_name: Optional file name (string) or ECLI count (int) for batch processing.
-        
+
     Returns:
         Tuple of (has_failures: bool, count: int)
     """
     failed_eclis_filename = FAILED_ECLIS_FILENAME_PATTERN.format(
         date=datetime.now().strftime(DATE_FORMAT_YMD)
     )
-    
+
     if check_file_in_directory(data_dir, failed_eclis_filename):
         file_path = Path(data_dir) / failed_eclis_filename
         failed_count = file_path.read_text(encoding="utf-8").count("\n")
-        
-        file_suffix = f" from {Path(str(file_name)).stem}.csv" if isinstance(file_name, str) else ""
+
+        file_suffix = (
+            f" from {Path(str(file_name)).stem}.csv"
+            if isinstance(file_name, str)
+            else ""
+        )
         logging.warning(
             f"FAILED: {failed_count} ECLI(s){file_suffix} failed to fetch metadata "
             f"from the API after attempting retries.\nFailed ECLI(s) are stored in: "
@@ -261,8 +303,42 @@ def report_failed_eclis(data_dir: str, file_name: Union[str, int] = "") -> tuple
         )
         return True, failed_count
     else:
-        total_eclis = file_name if isinstance(file_name, int) else "all"
-        logging.info(f"SUCCESS: All {total_eclis} ECLI(s) have been processed successfully with 0 failures.")
+        return False, 0
+
+
+def report_no_metadata_eclis(
+    data_dir: str, file_name: Union[str, int] = ""
+) -> tuple[bool, int]:
+    """
+    Reports summary of ECLIs with no metadata after extraction.
+
+    Args:
+        data_dir: The data directory path.
+        file_name: Optional file name (string) or ECLI count (int) for batch processing.
+
+    Returns:
+        Tuple of (has_no_metadata: bool, count: int)
+    """
+    no_metadata_filename = NO_METADATA_ECLIS_FILENAME_PATTERN.format(
+        date=datetime.now().strftime(DATE_FORMAT_YMD)
+    )
+
+    if check_file_in_directory(data_dir, no_metadata_filename):
+        file_path = Path(data_dir) / no_metadata_filename
+        no_metadata_count = file_path.read_text(encoding="utf-8").count("\n")
+
+        file_suffix = (
+            f" from {Path(str(file_name)).stem}.csv"
+            if isinstance(file_name, str)
+            else ""
+        )
+        logging.info(
+            f"INFO: {no_metadata_count} ECLI(s){file_suffix} were successfully accessed "
+            f"but contain no metadata in the API.\nThese ECLI(s) are stored in: "
+            f"{file_path}\nThey can be reviewed separately or retried later if the API is updated."
+        )
+        return True, no_metadata_count
+    else:
         return False, 0
 
 
@@ -274,19 +350,19 @@ def fetch_eclis_in_parallel(
 ) -> pd.DataFrame:
     """
     Fetches metadata for multiple ECLIs in parallel using thread pool.
-    
+
     Args:
         ecli_list: List of ECLI identifiers to fetch.
         columns: Column names for the result DataFrame.
         fake_headers: Whether to use fake headers for requests.
         data_dir: The data directory for storing failed ECLIs.
-        
+
     Returns:
         DataFrame with fetched metadata (may be empty if all failed).
     """
     max_workers = get_cores()
     thread_results = []
-    
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         with tqdm(
             total=len(ecli_list),
@@ -306,7 +382,7 @@ def fetch_eclis_in_parallel(
                 ): ecli
                 for ecli in ecli_list
             }
-            
+
             for future in futures:
                 try:
                     row_data = future.result()
@@ -316,8 +392,12 @@ def fetch_eclis_in_parallel(
                     logging.error(f"Error processing future: {e}")
                 finally:
                     progress_bar.update(1)
-    
-    return pd.concat(thread_results, ignore_index=True) if thread_results else pd.DataFrame(columns=columns)
+
+    return (
+        pd.concat(thread_results, ignore_index=True)
+        if thread_results
+        else pd.DataFrame(columns=columns)
+    )
 
 
 def get_data_from_api(
@@ -337,9 +417,11 @@ def get_data_from_api(
 
     Returns:
         List of row data matching the columns, or None if extraction fails.
+        Note: Returns row data even if no metadata was found (all values empty),
+        but such ECLIs are logged separately as "no metadata" cases.
     """
     url = f"{RECHTSPRAAK_METADATA_API_BASE_URL}{ecli_id}{API_RETURN_TYPE}"
-    
+
     try:
         xml_object = extract_data_from_xml(url, fake_headers=fake_headers)
         if xml_object is None:
@@ -349,24 +431,30 @@ def get_data_from_api(
             )
             save_data_when_crashed(ecli_id, data_dir)
             return None
-        
+
         soup = BeautifulSoup(xml_object, features="xml")
-        metadata_dict = process_metadata_fields(soup, ecli_id)
-        
+        metadata_dict, has_metadata = process_metadata_fields(soup, ecli_id)
+
+        # Check if any metadata was actually found
+        if not has_metadata:
+            logging.debug(f"No metadata found for ECLI {ecli_id}")
+            save_no_metadata_ecli(ecli_id, data_dir)
+            return None
+
         # Add ECLI and ensure all expected columns exist
         metadata_dict["ecli"] = ecli_id
         metadata_dict = {col: metadata_dict.get(col, "") for col in columns}
         row_data = [metadata_dict[col] for col in columns]
-        
+
         if len(row_data) != len(columns):
             logging.error(
                 f"Row data length ({len(row_data)}) does not match "
                 f"expected columns ({len(columns)}) for ECLI {ecli_id}."
             )
             return None
-        
+
         return row_data
-        
+
     except Exception as e:
         logging.debug(
             f"Error extracting metadata for ECLI {ecli_id}: {type(e).__name__}: {e}. "
@@ -507,7 +595,7 @@ def _process_single_source(
     # Load data
     if filename is not None:
         file_path = Path(data_dir) / filename
-        
+
         if not file_path.exists():
             logging.error(f"File not found: {file_path}")
             return False
@@ -563,13 +651,16 @@ def _process_single_source(
         if filename:
             output_file = Path(data_dir) / (Path(filename).stem + METADATA_CSV_SUFFIX)
         else:
-            output_file = Path(data_dir) / (f"custom_rechtspraak_{datetime.now().strftime(DATE_FORMAT_HMS)}.csv")
+            output_file = Path(data_dir) / (
+                f"custom_rechtspraak_{datetime.now().strftime(DATE_FORMAT_HMS)}.csv"
+            )
 
         metadata_df.to_csv(output_file, index=False, encoding="utf-8")
         logging.info(f"Metadata saved to: {output_file}")
 
     get_exe_time(start_time)
     report_failed_eclis(data_dir, filename or num_eclis)
+    report_no_metadata_eclis(data_dir, filename or num_eclis)
 
     return metadata_df if save_file == SaveFileOption.NO.value else True
 
@@ -610,7 +701,7 @@ def _process_all_files_in_directory(
 
         try:
             data = pd.read_csv(file_path)
-            
+
             if not _validate_data_source(data, f"File '{file_name}'"):
                 continue
 
@@ -644,8 +735,9 @@ def _process_all_files_in_directory(
                     f"No metadata retrieved for {file_name}. Check API status."
                 )
 
-            # Report failed ECLIs
+            # Report failed and no-metadata ECLIs
             report_failed_eclis(data_dir, file_name)
+            report_no_metadata_eclis(data_dir, file_name)
 
         except Exception as e:
             logging.error(f"Error processing {file_name}: {e}")
