@@ -30,7 +30,7 @@ def check_api(url: str) -> int:
 
     Returns:
         The HTTP response status code from the API.
-        
+
     Raises:
         requests.RequestException: If the API request fails.
     """
@@ -56,7 +56,7 @@ def read_csv(dir_name: str, exclude: Optional[str] = None) -> list[str]:
     Notes:
         - Only files with "rechtspraak" in their name are included.
         - If `exclude` is provided, files containing the `exclude` word are excluded.
-        
+
     Example:
         >>> files = read_csv("data/", exclude="metadata")
         >>> len(files)
@@ -64,11 +64,11 @@ def read_csv(dir_name: str, exclude: Optional[str] = None) -> list[str]:
     """
     csv_files = glob.glob(f"{dir_name}/*.csv")
     files = []
-    
+
     for file_path in csv_files:
         has_rechtspraak = RECHTSPRAAK_CSV_PREFIX in file_path
         has_exclude = exclude is not None and exclude in file_path
-        
+
         if has_rechtspraak and not has_exclude:
             files.append(file_path)
 
@@ -85,7 +85,7 @@ def get_exe_time(start_time: float) -> None:
 
     Logs:
         The total execution time in the format "hours:minutes:seconds".
-        
+
     Example:
         >>> import time
         >>> start = time.time()
@@ -94,12 +94,12 @@ def get_exe_time(start_time: float) -> None:
     """
     end_time = time.time()
     elapsed_seconds = end_time - start_time
-    
+
     minutes = int(elapsed_seconds // 60)
     seconds = elapsed_seconds % 60
     hours = minutes // 60
     minutes = minutes % 60
-    
+
     logging.info(f"Total execution time: {hours}:{minutes}:{seconds:.2f}")
     logging.info("")
 
@@ -129,35 +129,34 @@ def _num_of_available_docs(
         KeyError: If the API response format is unexpected.
         ValueError: If the document count cannot be parsed from the response.
     """
-    api_url = (
-        f"{url}max={amount}&from={from_index}&date={start_date}&date={end_date}"
-    )
-    
+    api_url = f"{url}max={amount}&from={from_index}&date={start_date}&date={end_date}"
+
     try:
         response = requests.get(api_url, timeout=10)
         response.raise_for_status()
         response.raw.decode_content = True
-        
+
         # Parse XML response
         parsed_xml = xmltodict.parse(response.text)
         json_string = json.dumps(parsed_xml)
         json_object = json.loads(json_string)
-        
+
         # Extract document count from API response
         subtitle_text = json_object["feed"]["subtitle"]["#text"]
         match = re.search(r"\d+", subtitle_text)
-        
+
         if not match:
-            logging.error(f"Could not parse document count from response: {subtitle_text}")
+            logging.error(
+                f"Could not parse document count from response: {subtitle_text}"
+            )
             return 0
-            
+
         doc_count = int(match.group())
         return doc_count
-        
+
     except requests.RequestException as e:
         logging.error(f"Failed to fetch available documents from API: {e}")
         raise
     except (KeyError, ValueError, AttributeError) as e:
         logging.error(f"Unexpected API response format: {e}")
         raise
-
