@@ -9,6 +9,7 @@ import pytest
 def rex():
     """Import rechtspraak_extractor once per test module for efficiency."""
     import rechtspraak_extractor
+
     return rechtspraak_extractor
 
 
@@ -17,6 +18,7 @@ def direct_imports():
     """Import functions directly once per test module."""
     from rechtspraak_extractor.rechtspraak import get_rechtspraak
     from rechtspraak_extractor.rechtspraak_metadata import get_rechtspraak_metadata
+
     return get_rechtspraak, get_rechtspraak_metadata
 
 
