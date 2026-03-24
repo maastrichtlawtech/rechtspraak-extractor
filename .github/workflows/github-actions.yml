@@ -94,7 +94,7 @@ jobs:
   testpypi-publish:
     if: github.event_name == 'pull_request' && github.base_ref == 'main'
     name: Publish to TestPyPI
-    needs: build
+    needs: [build, test]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
