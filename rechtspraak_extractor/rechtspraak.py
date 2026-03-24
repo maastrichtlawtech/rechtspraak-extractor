@@ -143,9 +143,7 @@ def get_data_from_url(
                 entries = [entries] if entries else []
 
             all_results.extend(entries)
-            logging.info(
-                f"Retrieved {len(entries)} cases (total: {len(all_results)})"
-            )
+            logging.info(f"Retrieved {len(entries)} cases (total: {len(all_results)})")
 
             # Check if we've reached the target
             if len(all_results) >= total_docs:
@@ -203,7 +201,7 @@ def save_csv(
     if save_file == "y":
         Path(DATA_DIRECTORY).mkdir(parents=True, exist_ok=True)
         csv_path = Path(DATA_DIRECTORY) / f"{file_name}.csv"
-        
+
         try:
             df.to_csv(csv_path, index=False, encoding=CSV_ENCODING)
             logging.info(f"Data saved to CSV file: {csv_path}")
@@ -299,8 +297,7 @@ def get_rechtspraak(
 
     if total_docs < max_ecli:
         logging.info(
-            f"Only {total_docs} documents available "
-            f"(requested {max_ecli})"
+            f"Only {total_docs} documents available " f"(requested {max_ecli})"
         )
 
     target_docs = min(total_docs, max_ecli)
@@ -340,6 +337,5 @@ def get_rechtspraak(
     # Return DataFrame only if not saving to file
     if save_file == "n":
         return result_df
-    
-    return None
 
+    return None
