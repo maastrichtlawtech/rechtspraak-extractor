@@ -2,11 +2,11 @@ name: Build, Test, Lint & Upload to TestPyPI and PyPI for Rechtspraak_Extractor
 
 on:
   push:
-    branches: [ rechtspraak ]
+    branches: [ main ]
     tags:
       - 'v*.*.*'
   pull_request:
-    branches: [ rechtspraak ]
+    branches: [ main, develop ]
 
 jobs:
   lint:
@@ -25,14 +25,14 @@ jobs:
         uses: github/super-linter@v4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEFAULT_BRANCH: 'rechtspraak'
+          DEFAULT_BRANCH: 'main'
           VALIDATE_PYTHON_BLACK: true
           IGNORE_GITIGNORED_FILES: true
           VALIDATE_ALL_CODEBASE: false
       
   test:
     needs: lint
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -92,9 +92,9 @@ jobs:
           path: dist/
 
   testpypi-publish:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     name: Publish to TestPyPI
-    needs: build
+    needs: [build, test]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -136,7 +136,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   github-release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.base_ref == 'main'
     name: Sign the Python distribution with Sigstore and upload them to GitHub Releases
     needs:
       - pypi-publish
