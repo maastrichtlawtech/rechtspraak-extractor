@@ -1,13 +1,27 @@
 """
 Test module to verify import behavior matches README documentation.
 """
+import inspect
 import pytest
 
 
-def test_package_level_import():
-    """Test that functions are accessible at package level as shown in README."""
-    import rechtspraak_extractor as rex
+@pytest.fixture(scope="module")
+def rex():
+    """Import rechtspraak_extractor once per test module for efficiency."""
+    import rechtspraak_extractor
+    return rechtspraak_extractor
 
+
+@pytest.fixture(scope="module")
+def direct_imports():
+    """Import functions directly once per test module."""
+    from rechtspraak_extractor.rechtspraak import get_rechtspraak
+    from rechtspraak_extractor.rechtspraak_metadata import get_rechtspraak_metadata
+    return get_rechtspraak, get_rechtspraak_metadata
+
+
+def test_package_level_import(rex):
+    """Test that functions are accessible at package level as shown in README."""
     # Verify functions are accessible
     assert hasattr(rex, "get_rechtspraak"), "get_rechtspraak not found at package level"
     assert hasattr(
@@ -21,10 +35,9 @@ def test_package_level_import():
     ), "get_rechtspraak_metadata is not callable"
 
 
-def test_direct_module_import():
+def test_direct_module_import(direct_imports):
     """Test that direct imports still work (backwards compatibility)."""
-    from rechtspraak_extractor.rechtspraak import get_rechtspraak
-    from rechtspraak_extractor.rechtspraak_metadata import get_rechtspraak_metadata
+    get_rechtspraak, get_rechtspraak_metadata = direct_imports
 
     assert callable(get_rechtspraak), "get_rechtspraak not callable from direct import"
     assert callable(
@@ -32,10 +45,8 @@ def test_direct_module_import():
     ), "get_rechtspraak_metadata not callable from direct import"
 
 
-def test_module_access():
+def test_module_access(rex):
     """Test that submodules are still accessible."""
-    import rechtspraak_extractor as rex
-
     # Verify submodules are accessible
     assert hasattr(rex, "rechtspraak"), "rechtspraak module not accessible"
     assert hasattr(
@@ -54,10 +65,8 @@ def test_module_access():
     ), "get_rechtspraak_metadata not in rechtspraak_metadata module"
 
 
-def test_all_exports():
+def test_all_exports(rex):
     """Test that __all__ is properly defined."""
-    import rechtspraak_extractor as rex
-
     assert hasattr(rex, "__all__"), "__all__ not defined"
     assert "get_rechtspraak" in rex.__all__, "get_rechtspraak not in __all__"
     assert (
@@ -65,11 +74,8 @@ def test_all_exports():
     ), "get_rechtspraak_metadata not in __all__"
 
 
-def test_function_signatures():
+def test_function_signatures(rex):
     """Test that functions have the expected signatures."""
-    import inspect
-    import rechtspraak_extractor as rex
-
     # Test get_rechtspraak signature
     sig = inspect.signature(rex.get_rechtspraak)
     params = list(sig.parameters.keys())
