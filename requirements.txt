@@ -18,3 +18,4 @@ urllib3
 xmltodict
 fake-headers
 lxml
+SPARQLWrapper
