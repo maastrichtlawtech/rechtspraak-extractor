@@ -32,7 +32,8 @@ dependencies = [
     "urllib3",
     "xmltodict",
     "fake-headers",
-    "lxml"
+    "lxml",
+    "SPARQLWrapper"
 ]
 
 [project.urls]
