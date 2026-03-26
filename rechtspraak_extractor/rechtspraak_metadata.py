@@ -26,6 +26,8 @@ from rechtspraak_extractor.rechtspraak_functions import (
 )
 from threading import Lock
 from tqdm import tqdm
+from SPARQLWrapper import SPARQLWrapper, JSON
+import sqlite3
 
 
 # ============================================================================
@@ -43,36 +45,45 @@ DEFAULT_DATA_DIR = "data/raw/"
 
 METADATA_COLUMNS = [
     "ecli",
-    "full_text",
-    "creator",
+    "date_publication",
+    "language",
+    "instance",
+    "jurisdiction_city",
     "date_decision",
-    "issued",
-    "zaaknummer",
-    "type",
-    "relations",
-    "references",
-    "subject",
-    "procedure",
-    "inhoudsindicatie",
-    "hasVersion",
+    "case_number",
+    "document_type",
+    "procedure_type",
+    "domains",
+    "referenced_legislation_titles",
+    "alternative_publications",
+    "title",
+    "full_text",
+    "summary",
+    "citing",
+    "cited_by",
+    "legislations_cited",
+    "predecessor_successor_cases",
+    "url_publications",
+    "info",
+    "source"
 ]
 
 METADATA_FIELD_MAPPING = {
-    "creator": "dcterms:creator",
+    "instance": "dcterms:creator",
     "date_decision": "dcterms:date",
-    "issued": "dcterms:issued",
-    "zaaknummer": "psi:zaaknummer",
-    "type": "dcterms:type",
-    "subject": "dcterms:subject",
-    "relations": "dcterms:relation",
-    "references": "dcterms:references",
-    "procedure": "psi:procedure",
-    "inhoudsindicatie": "inhoudsindicatie",
-    "hasVersion": "dcterms:hasVersion",
+    "date_publication": "dcterms:issued",
+    "case_number": "psi:zaaknummer",
+    "document_type": "dcterms:type",
+    "domains": "dcterms:subject",
+    "citing": "dcterms:relation",
+    "legislations_cited": "dcterms:references",
+    "procedure_type": "psi:procedure",
+    "summary": "inhoudsindicatie",
+    "alternative_publications": "dcterms:hasVersion",
     "full_text": "uitspraak",
 }
 
-MULTIPLE_VALUE_FIELDS = {"relations", "references"}
+MULTIPLE_VALUE_FIELDS = {"citing", "legislations_cited", "domains", "case_number"}
 
 # Global lock for thread-safe file operations
 file_write_lock = Lock()
@@ -342,6 +353,184 @@ def report_no_metadata_eclis(
         return False, 0
 
 
+def fetch_eclis_via_sparql(
+    ecli_list: list[str],
+    endpoint: str,
+    columns: list[str],
+    batch_size: int = 100,
+) -> pd.DataFrame:
+    """
+    Fetches metadata for multiple ECLIs in batches using a SPARQL endpoint.
+
+    Args:
+        ecli_list: List of ECLI identifiers to fetch.
+        endpoint: The SPARQL endpoint URL (e.g., GraphDB).
+        columns: Expected column names for the result DataFrame.
+        batch_size: Number of ECLIs to query per SPARQL request.
+
+    Returns:
+        DataFrame with fetched metadata.
+    """
+    sparql = SPARQLWrapper(endpoint)
+    sparql.setReturnFormat(JSON)
+    
+    all_results = []
+    
+    with tqdm(
+        total=len(ecli_list),
+        colour="BLUE",
+        position=0,
+        leave=True,
+        desc="SPARQL Extraction"
+    ) as progress_bar:
+        # Process in batches to avoid overwhelming the endpoint or hitting URI limits
+        for i in range(0, len(ecli_list), batch_size):
+            batch = ecli_list[i:i + batch_size]
+            
+            # Format ECLI values for the SPARQL query
+            values_clause = " ".join([f'<http://deeplink.rechtspraak.nl/uitspraak?id={ecli}>' for ecli in batch])
+            
+            # LIDO SPARQL Query mapping to required columns
+            query = f"""
+            PREFIX dcterms: <http://purl.org/dc/terms/>
+            PREFIX psi: <http://psi.rechtspraak.nl/>
+            PREFIX bwb: <bwb-ontology-url>
+            
+            SELECT ?ecli 
+                   (GROUP_CONCAT(DISTINCT ?creator; separator="\\n") as ?creator_list)
+                   (MAX(?date) as ?date_decision)
+                   (MAX(?issued) as ?issued_date)
+                   (GROUP_CONCAT(DISTINCT ?zaaknummer; separator="\\n") as ?zaaknummer_list)
+                   (MAX(?type) as ?type_val)
+                   (GROUP_CONCAT(DISTINCT ?subject; separator="\\n") as ?subject_list)
+                   (GROUP_CONCAT(DISTINCT ?procedure; separator="\\n") as ?procedure_list)
+                   (MAX(?inhoudsindicatie) as ?inhoud_val)
+                   (MAX(?hasVersion) as ?version)
+                   (GROUP_CONCAT(DISTINCT ?relation; separator="\\n") as ?relations_list)
+                   (GROUP_CONCAT(DISTINCT ?reference; separator="\\n") as ?references_list)
+                   (MAX(?uitspraak) as ?full_text_val)
+            WHERE {{
+              VALUES ?ecli_uri {{ {values_clause} }}
+              
+              ?ecli_uri dcterms:identifier ?ecli .
+              OPTIONAL {{ ?ecli_uri dcterms:creator ?creator }}
+              OPTIONAL {{ ?ecli_uri dcterms:date ?date }}
+              OPTIONAL {{ ?ecli_uri dcterms:issued ?issued }}
+              OPTIONAL {{ ?ecli_uri psi:zaaknummer ?zaaknummer }}
+              OPTIONAL {{ ?ecli_uri dcterms:type ?type }}
+              OPTIONAL {{ ?ecli_uri dcterms:subject ?subject }}
+              
+              OPTIONAL {{ ?ecli_uri dcterms:relation ?relation }}
+              OPTIONAL {{ ?ecli_uri dcterms:references ?reference }}
+              OPTIONAL {{ ?ecli_uri psi:procedure ?procedure }}
+              OPTIONAL {{ ?ecli_uri <inhoudsindicatie> ?inhoudsindicatie }}
+              OPTIONAL {{ ?ecli_uri dcterms:hasVersion ?hasVersion }}
+              OPTIONAL {{ ?ecli_uri <uitspraak> ?uitspraak }}
+            }}
+            GROUP BY ?ecli
+            """
+            
+            sparql.setQuery(query)
+            try:
+                response = sparql.query().convert()
+                
+                for result in response["results"]["bindings"]:
+                    row = {col: "" for col in columns}
+                    
+                    ecli_val = result.get("ecli", {}).get("value", "")
+                    row["ecli"] = ecli_val
+                    row["instance"] = result.get("creator_list", {}).get("value", "")
+                    row["date_decision"] = result.get("date_decision", {}).get("value", "")
+                    row["date_publication"] = result.get("issued_date", {}).get("value", "")
+                    row["language"] = "nl"
+                    row["source"] = "Rechtspraak"
+                    row["url_publications"] = f"https://uitspraken.rechtspraak.nl/inziendocument?id={ecli_val}"
+                    row["case_number"] = result.get("zaaknummer_list", {}).get("value", "")
+                    row["document_type"] = result.get("type_val", {}).get("value", "")
+                    row["domains"] = result.get("subject_list", {}).get("value", "")
+                    row["procedure_type"] = result.get("procedure_list", {}).get("value", "")
+                    row["summary"] = result.get("inhoud_val", {}).get("value", "")
+                    row["alternative_publications"] = result.get("version", {}).get("value", "")
+                    row["citing"] = result.get("relations_list", {}).get("value", "")
+                    row["legislations_cited"] = result.get("references_list", {}).get("value", "")
+                    row["full_text"] = result.get("full_text_val", {}).get("value", "")
+                    
+                    all_results.append(row)
+            except Exception as e:
+                logging.error(f"Error querying SPARQL endpoint for batch: {e}")
+                
+            progress_bar.update(len(batch))
+            
+    if all_results:
+        return pd.DataFrame(all_results, columns=columns)
+    else:
+        return pd.DataFrame(columns=columns)
+
+
+def fetch_eclis_via_sqlite(
+    ecli_list: list[str],
+    sqlite_db_path: str,
+    columns: list[str],
+) -> pd.DataFrame:
+    """
+    Fetches metadata for multiple ECLIs using a local pre-built SQLite DB.
+    
+    Args:
+        ecli_list: List of ECLIs to lookup.
+        sqlite_db_path: Path to the SQLite database (built via build_lido_sqlite.py).
+        columns: Expected column names.
+        
+    Returns:
+        DataFrame with fetched metadata.
+    """
+    if not os.path.exists(sqlite_db_path):
+        logging.error(f"SQLite database {sqlite_db_path} does not exist. Please run `build_lido_sqlite.py` or use method='api'.")
+        return pd.DataFrame(columns=columns)
+        
+    conn = sqlite3.connect(sqlite_db_path)
+    
+    # Chunking query to not exceed SQLite variable limits (usually 999)
+    chunk_size = 900
+    all_results = []
+    
+    with tqdm(total=len(ecli_list), colour="YELLOW", desc="SQLite Extraction") as progress_bar:
+        for i in range(0, len(ecli_list), chunk_size):
+            chunk = ecli_list[i:i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            
+            # Match Case Law Explorer mapping directly
+            query = f"""
+                SELECT 
+                    ecli, date_publication, language, instance, jurisdiction_city, 
+                    date_decision, case_number, document_type, procedure_type, 
+                    domains, referenced_legislation_titles, alternative_publications, 
+                    title, full_text, summary, citing, cited_by, legislations_cited, 
+                    predecessor_successor_cases, url_publications, info, source
+                FROM metadata
+                WHERE ecli IN ({placeholders})
+            """
+            
+            try:
+                # Let pandas parse it directly
+                df_chunk = pd.read_sql_query(query, conn, params=chunk)
+                
+                # Make sure we only grab requested columns and they exist
+                for col in columns:
+                    if col not in df_chunk.columns:
+                        df_chunk[col] = ""
+                        
+                all_results.append(df_chunk[columns])
+            except Exception as e:
+                logging.error(f"SQLite query error: {e}")
+                
+            progress_bar.update(len(chunk))
+            
+    conn.close()
+    
+    if all_results:
+        return pd.concat(all_results, ignore_index=True)
+    return pd.DataFrame(columns=columns)
+
 def fetch_eclis_in_parallel(
     ecli_list: list[str],
     columns: list[str],
@@ -471,9 +660,14 @@ def get_rechtspraak_metadata(
     _fake_headers: bool = False,
     multi_threading: bool = True,
     data_dir: str = DEFAULT_DATA_DIR,
+    method: str = "api",
+    sparql_endpoint: str = "http://localhost:7200/repositories/lido",
+    sqlite_db_path: str = "data/lido_metadata.db",
+    fallback_to_api: bool = True,
+    batch_size: int = 100,
 ) -> Union[bool, pd.DataFrame]:
     """
-    Extracts metadata from the Rechtspraak API for a given dataset or file.
+    Extracts metadata from the Rechtspraak API or a SPARQL endpoint for a given dataset or file.
 
     Args:
         save_file: Save to file? 'y' (yes) or 'n' (no). Default: 'n'.
@@ -534,6 +728,11 @@ def get_rechtspraak_metadata(
             fake_headers=_fake_headers,
             data_dir=data_dir,
             start_time=start_time,
+            method=method,
+            sparql_endpoint=sparql_endpoint,
+            sqlite_db_path=sqlite_db_path,
+            fallback_to_api=fallback_to_api,
+            batch_size=batch_size,
         )
 
     # Process all files in directory
@@ -542,6 +741,11 @@ def get_rechtspraak_metadata(
             data_dir=data_dir,
             fake_headers=_fake_headers,
             start_time=start_time,
+            method=method,
+            sparql_endpoint=sparql_endpoint,
+            sqlite_db_path=sqlite_db_path,
+            fallback_to_api=fallback_to_api,
+            batch_size=batch_size,
         )
 
     return False
@@ -577,6 +781,11 @@ def _process_single_source(
     fake_headers: bool,
     data_dir: str,
     start_time: float,
+    method: str = "api",
+    sparql_endpoint: str = "http://localhost:7200/repositories/lido",
+    sqlite_db_path: str = "data/lido_metadata.db",
+    fallback_to_api: bool = True,
+    batch_size: int = 100,
 ) -> Union[bool, pd.DataFrame]:
     """
     Process metadata extraction for a single source (file or dataframe).
@@ -621,12 +830,80 @@ def _process_single_source(
     ecli_list = data["id"].tolist()
 
     # Fetch metadata
-    metadata_df = fetch_eclis_in_parallel(
-        ecli_list=ecli_list,
-        columns=METADATA_COLUMNS,
-        fake_headers=fake_headers,
-        data_dir=data_dir,
-    )
+    if method == "sqlite":
+        logging.info(f"Extracting {len(ecli_list)} ECLIs via local SQLite database at {sqlite_db_path}")
+        metadata_df = fetch_eclis_via_sqlite(
+            ecli_list=ecli_list,
+            sqlite_db_path=sqlite_db_path,
+            columns=METADATA_COLUMNS,
+        )
+        
+        # Fallback check
+        if not metadata_df.empty:
+            found_eclis = set(metadata_df["ecli"].tolist())
+        else:
+            found_eclis = set()
+            
+        missing_eclis = [e for e in ecli_list if e not in found_eclis]
+        
+        if missing_eclis and fallback_to_api:
+            logging.info(f"SQLite returned {len(found_eclis)}/{len(ecli_list)} records. Falling back to API for {len(missing_eclis)} remaining ECLIs...")
+            fallback_df = fetch_eclis_in_parallel(
+                ecli_list=missing_eclis,
+                columns=METADATA_COLUMNS,
+                fake_headers=fake_headers,
+                data_dir=data_dir,
+            )
+            if not metadata_df.empty:
+                metadata_df = pd.concat([metadata_df, fallback_df], ignore_index=True)
+            else:
+                metadata_df = fallback_df
+        elif missing_eclis:
+            logging.warning(f"{len(missing_eclis)} ECLIs not found via SQLite and fallback is disabled.")
+            for ecli in missing_eclis:
+                save_data_when_crashed(ecli, data_dir)
+                
+    elif method == "sparql":
+        logging.info(f"Extracting {len(ecli_list)} ECLIs via SPARQL endpoint {sparql_endpoint}")
+        metadata_df = fetch_eclis_via_sparql(
+            ecli_list=ecli_list,
+            endpoint=sparql_endpoint,
+            columns=METADATA_COLUMNS,
+            batch_size=batch_size,
+        )
+        
+        # Check for missing
+        if not metadata_df.empty:
+            found_eclis = set(metadata_df["ecli"].tolist())
+        else:
+            found_eclis = set()
+            
+        missing_eclis = [e for e in ecli_list if e not in found_eclis]
+        
+        if missing_eclis and fallback_to_api:
+            logging.info(f"SPARQL returned {len(found_eclis)}/{len(ecli_list)} records. Falling back to API for remaining {len(missing_eclis)} ECLIs...")
+            fallback_df = fetch_eclis_in_parallel(
+                ecli_list=missing_eclis,
+                columns=METADATA_COLUMNS,
+                fake_headers=fake_headers,
+                data_dir=data_dir,
+            )
+            if not metadata_df.empty:
+                metadata_df = pd.concat([metadata_df, fallback_df], ignore_index=True)
+            else:
+                metadata_df = fallback_df
+        elif missing_eclis:
+            logging.warning(f"{len(missing_eclis)} ECLIs not found via SPARQL and fallback is disabled.")
+            for ecli in missing_eclis:
+                save_data_when_crashed(ecli, data_dir)
+                
+    else:
+        metadata_df = fetch_eclis_in_parallel(
+            ecli_list=ecli_list,
+            columns=METADATA_COLUMNS,
+            fake_headers=fake_headers,
+            data_dir=data_dir,
+        )
 
     # Merge with original data
     if not metadata_df.empty:
@@ -669,6 +946,11 @@ def _process_all_files_in_directory(
     data_dir: str,
     fake_headers: bool,
     start_time: float,
+    method: str = "api",
+    sparql_endpoint: str = "http://localhost:7200/repositories/lido",
+    sqlite_db_path: str = "data/lido_metadata.db",
+    fallback_to_api: bool = True,
+    batch_size: int = 100,
 ) -> bool:
     """
     Process metadata extraction for all CSV files in a directory.
@@ -709,12 +991,76 @@ def _process_all_files_in_directory(
             ecli_list = data["id"].tolist()
 
             # Fetch metadata
-            metadata_df = fetch_eclis_in_parallel(
-                ecli_list=ecli_list,
-                columns=METADATA_COLUMNS,
-                fake_headers=fake_headers,
-                data_dir=data_dir,
-            )
+            if method == "sqlite":
+                logging.info(f"Extracting {len(ecli_list)} ECLIs via local SQLite database at {sqlite_db_path}")
+                metadata_df = fetch_eclis_via_sqlite(
+                    ecli_list=ecli_list,
+                    sqlite_db_path=sqlite_db_path,
+                    columns=METADATA_COLUMNS,
+                )
+                
+                if not metadata_df.empty:
+                    found_eclis = set(metadata_df["ecli"].tolist())
+                else:
+                    found_eclis = set()
+                    
+                missing_eclis = [e for e in ecli_list if e not in found_eclis]
+                
+                if missing_eclis and fallback_to_api:
+                    logging.info(f"SQLite returned {len(found_eclis)}/{len(ecli_list)} records. Falling back to API for {len(missing_eclis)} remaining ECLIs...")
+                    fallback_df = fetch_eclis_in_parallel(
+                        ecli_list=missing_eclis,
+                        columns=METADATA_COLUMNS,
+                        fake_headers=fake_headers,
+                        data_dir=data_dir,
+                    )
+                    if not metadata_df.empty:
+                        metadata_df = pd.concat([metadata_df, fallback_df], ignore_index=True)
+                    else:
+                        metadata_df = fallback_df
+                elif missing_eclis:
+                    logging.warning(f"{len(missing_eclis)} ECLIs not found via SQLite and fallback is disabled.")
+                    for ecli in missing_eclis:
+                        save_data_when_crashed(ecli, data_dir)
+            elif method == "sparql":
+                logging.info(f"Extracting {len(ecli_list)} ECLIs via SPARQL endpoint {sparql_endpoint}")
+                metadata_df = fetch_eclis_via_sparql(
+                    ecli_list=ecli_list,
+                    endpoint=sparql_endpoint,
+                    columns=METADATA_COLUMNS,
+                    batch_size=batch_size,
+                )
+                
+                if not metadata_df.empty:
+                    found_eclis = set(metadata_df["ecli"].tolist())
+                else:
+                    found_eclis = set()
+                    
+                missing_eclis = [e for e in ecli_list if e not in found_eclis]
+                
+                if missing_eclis and fallback_to_api:
+                    logging.info(f"SPARQL returned {len(found_eclis)}/{len(ecli_list)} records. Falling back to API for {len(missing_eclis)} remaining ECLIs...")
+                    fallback_df = fetch_eclis_in_parallel(
+                        ecli_list=missing_eclis,
+                        columns=METADATA_COLUMNS,
+                        fake_headers=fake_headers,
+                        data_dir=data_dir,
+                    )
+                    if not metadata_df.empty:
+                        metadata_df = pd.concat([metadata_df, fallback_df], ignore_index=True)
+                    else:
+                        metadata_df = fallback_df
+                elif missing_eclis:
+                    logging.warning(f"{len(missing_eclis)} ECLIs not found via SPARQL and fallback is disabled.")
+                    for ecli in missing_eclis:
+                        save_data_when_crashed(ecli, data_dir)
+            else:
+                metadata_df = fetch_eclis_in_parallel(
+                    ecli_list=ecli_list,
+                    columns=METADATA_COLUMNS,
+                    fake_headers=fake_headers,
+                    data_dir=data_dir,
+                )
 
             # Merge with original data
             if not metadata_df.empty:
