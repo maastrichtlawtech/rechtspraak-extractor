@@ -45,27 +45,19 @@ DEFAULT_DATA_DIR = "data/raw/"
 
 METADATA_COLUMNS = [
     "ecli",
+    "document_type",
+    "date_decision",
     "date_publication",
     "language",
     "instance",
-    "jurisdiction_city",
-    "date_decision",
     "case_number",
-    "document_type",
     "procedure_type",
-    "domains",
-    "referenced_legislation_titles",
-    "alternative_publications",
-    "title",
-    "full_text",
-    "summary",
+    "spatial",
     "citing",
-    "cited_by",
-    "legislations_cited",
-    "predecessor_successor_cases",
-    "url_publications",
+    "domains",
+    "alternative_publications",
     "info",
-    "source"
+    "full_text",
 ]
 
 METADATA_FIELD_MAPPING = {
@@ -76,14 +68,18 @@ METADATA_FIELD_MAPPING = {
     "document_type": "dcterms:type",
     "domains": "dcterms:subject",
     "citing": "dcterms:relation",
-    "legislations_cited": "dcterms:references",
     "procedure_type": "psi:procedure",
-    "summary": "inhoudsindicatie",
     "alternative_publications": "dcterms:hasVersion",
     "full_text": "uitspraak",
+    "info": "dcterms:description",
+    "language": "dcterms:language",
+    "spatial": "dcterms:spatial",
 }
 
-MULTIPLE_VALUE_FIELDS = {"citing", "legislations_cited", "domains", "case_number"}
+MULTIPLE_VALUE_FIELDS = {
+    "domains",
+    "case_number",
+}
 
 # Global lock for thread-safe file operations
 file_write_lock = Lock()
@@ -452,7 +448,6 @@ def fetch_eclis_via_sparql(
                     row["summary"] = result.get("inhoud_val", {}).get("value", "")
                     row["alternative_publications"] = result.get("version", {}).get("value", "")
                     row["citing"] = result.get("relations_list", {}).get("value", "")
-                    row["legislations_cited"] = result.get("references_list", {}).get("value", "")
                     row["full_text"] = result.get("full_text_val", {}).get("value", "")
                     
                     all_results.append(row)
