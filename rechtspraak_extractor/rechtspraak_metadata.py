@@ -943,7 +943,7 @@ def _process_all_files_in_directory(
     start_time: float,
     method: str = "api",
     sparql_endpoint: str = "http://localhost:7200/repositories/lido",
-    sqlite_db_path: str = "data/lido_metadata.db",
+    sqlite_db_path: str = "data/lido.db",
     fallback_to_api: bool = True,
     batch_size: int = 100,
 ) -> bool:
