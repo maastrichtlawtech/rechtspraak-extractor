@@ -34,13 +34,20 @@ import sqlite3
 # ============================================================================
 RECHTSPRAAK_METADATA_API_BASE_URL = "https://data.rechtspraak.nl/uitspraken/content?id="
 API_RETURN_TYPE = "&return=DOC"
+# Maximum HTTP fetch attempts before marking an ECLI as failed.
 MAX_RETRIES = 2
+# Delay before first retry; doubles each attempt (1s, 2s, 4s, ...).
+RETRY_BASE_DELAY_SECONDS = 1.0
 DATE_FORMAT_YMD = "%Y%m%d"
 DATE_FORMAT_HMS = "%H-%M-%S"
 FAILED_ECLIS_FILENAME_PATTERN = "custom_rechtspraak_{date}_failed_eclis.txt"
 NO_METADATA_ECLIS_FILENAME_PATTERN = "custom_rechtspraak_{date}_no_metadata_eclis.txt"
 METADATA_CSV_SUFFIX = "_metadata.csv"
 DEFAULT_DATA_DIR = "data/raw/"
+# SQLite SQLITE_MAX_VARIABLE_NUMBER default is 999; 900 leaves headroom.
+SQLITE_CHUNK_SIZE = 900
+# Max seconds between tqdm progress bar refreshes in threaded contexts.
+TQDM_MAX_INTERVAL = 10000
 
 METADATA_COLUMNS = [
     "ecli",
@@ -166,15 +173,17 @@ def extract_data_from_xml(url: str, fake_headers: bool = False) -> Optional[byte
                 return response.read()
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
             if attempt < MAX_RETRIES - 1:
+                delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
                 logging.debug(
-                    f"Retry {attempt + 1}/{MAX_RETRIES} for URL {url}: {type(e).__name__}"
+                    f"Retry {attempt + 1}/{MAX_RETRIES} for URL {url}: {type(e).__name__} — waiting {delay:.1f}s"
                 )
+                time.sleep(delay)
             else:
-                logging.debug(
+                logging.warning(
                     f"Failed to fetch {url} after {MAX_RETRIES} attempts: {type(e).__name__}"
                 )
         except Exception as e:
-            logging.debug(f"Unexpected error fetching {url}: {e}")
+            logging.warning(f"Unexpected error fetching {url}: {e}")
 
     return None
 
@@ -370,7 +379,7 @@ def fetch_eclis_via_sqlite(
     conn = sqlite3.connect(sqlite_db_path)
     
     # Chunking query to not exceed SQLite variable limits (usually 999)
-    chunk_size = 900
+    chunk_size = SQLITE_CHUNK_SIZE
     all_results = []
     
     with tqdm(total=len(ecli_list), colour="YELLOW", desc="SQLite Extraction") as progress_bar:
@@ -411,6 +420,89 @@ def fetch_eclis_via_sqlite(
         return pd.concat(all_results, ignore_index=True)
     return pd.DataFrame(columns=columns)
 
+def _fetch_metadata_for_ecli_list(
+    ecli_list: list[str],
+    method: str,
+    sqlite_db_path: str,
+    fallback_to_api: bool,
+    fake_headers: bool,
+    data_dir: str,
+    multi_threading: bool = True,
+) -> pd.DataFrame:
+    """
+    Fetch metadata for a list of ECLIs using the configured method.
+
+    Handles SQLite lookup with optional API fallback, or direct API fetch.
+
+    Args:
+        ecli_list: ECLIs to look up.
+        method: 'sqlite' or 'api'.
+        sqlite_db_path: Path to SQLite database (only used when method='sqlite').
+        fallback_to_api: Whether to fall back to API when SQLite misses ECLIs.
+        fake_headers: Whether to use fake headers for API requests.
+        data_dir: Directory for writing failed-ECLI logs.
+        multi_threading: Use ThreadPoolExecutor for API fetches (default: True).
+
+    Returns:
+        DataFrame with metadata columns, possibly empty.
+    """
+    if method == "sqlite":
+        logging.info(
+            f"Extracting {len(ecli_list)} ECLIs via local SQLite database at {sqlite_db_path}"
+        )
+        metadata_df = fetch_eclis_via_sqlite(
+            ecli_list=ecli_list,
+            sqlite_db_path=sqlite_db_path,
+            columns=METADATA_COLUMNS,
+        )
+        found_eclis = set(metadata_df["ecli"].tolist()) if not metadata_df.empty else set()
+        missing_eclis = [e for e in ecli_list if e not in found_eclis]
+
+        if missing_eclis and fallback_to_api:
+            logging.info(
+                f"SQLite returned {len(found_eclis)}/{len(ecli_list)} records. "
+                f"Falling back to API for {len(missing_eclis)} remaining ECLIs..."
+            )
+            fallback_df = _api_fetch(missing_eclis, fake_headers, data_dir, multi_threading)
+            metadata_df = (
+                pd.concat([metadata_df, fallback_df], ignore_index=True)
+                if not metadata_df.empty
+                else fallback_df
+            )
+        elif missing_eclis:
+            logging.warning(
+                f"{len(missing_eclis)} ECLIs not found via SQLite and fallback is disabled."
+            )
+            for ecli in missing_eclis:
+                save_data_when_crashed(ecli, data_dir)
+    else:
+        metadata_df = _api_fetch(ecli_list, fake_headers, data_dir, multi_threading)
+
+    return metadata_df
+
+
+def _api_fetch(
+    ecli_list: list[str],
+    fake_headers: bool,
+    data_dir: str,
+    multi_threading: bool,
+) -> pd.DataFrame:
+    """Fetch metadata via API, using threads or sequentially based on multi_threading."""
+    if multi_threading:
+        return fetch_eclis_in_parallel(
+            ecli_list=ecli_list,
+            columns=METADATA_COLUMNS,
+            fake_headers=fake_headers,
+            data_dir=data_dir,
+        )
+    results = [
+        get_data_from_api(ecli, METADATA_COLUMNS, fake_headers, data_dir)
+        for ecli in ecli_list
+    ]
+    rows = [pd.DataFrame([r], columns=METADATA_COLUMNS) for r in results if r is not None]
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=METADATA_COLUMNS)
+
+
 def fetch_eclis_in_parallel(
     ecli_list: list[str],
     columns: list[str],
@@ -439,7 +531,7 @@ def fetch_eclis_in_parallel(
             position=0,
             leave=True,
             miniters=max(1, len(ecli_list) // 100),
-            maxinterval=10000,
+            maxinterval=TQDM_MAX_INTERVAL,
         ) as progress_bar:
             futures = {
                 executor.submit(
@@ -494,7 +586,7 @@ def get_data_from_api(
     try:
         xml_object = extract_data_from_xml(url, fake_headers=fake_headers)
         if xml_object is None:
-            logging.debug(
+            logging.warning(
                 f"Failed to fetch XML content for ECLI: {ecli_id} after "
                 f"attempting {MAX_RETRIES} retries"
             )
@@ -525,7 +617,7 @@ def get_data_from_api(
         return row_data
 
     except Exception as e:
-        logging.debug(
+        logging.error(
             f"Error extracting metadata for ECLI {ecli_id}: {type(e).__name__}: {e}. "
             f"ECLI will be marked as failed."
         )
@@ -543,8 +635,7 @@ def get_rechtspraak_metadata(
     method: str = "api",
     sqlite_db_path: str = "data/lido_metadata.db",
     fallback_to_api: bool = True,
-    batch_size: int = 100,
-) -> Union[bool, pd.DataFrame]:
+) -> Optional[pd.DataFrame]:
     """
     Extracts metadata from the Rechtspraak API for a given dataset or file.
 
@@ -558,8 +649,7 @@ def get_rechtspraak_metadata(
 
     Returns:
         - DataFrame if save_file="n" and extraction succeeds.
-        - True if save_file="y" and extraction succeeds.
-        - False if there are errors or inputs are invalid.
+        - None if there are errors or inputs are invalid.
 
     Raises:
         ValueError: If both dataframe and filename are provided, or if neither
@@ -584,15 +674,15 @@ def get_rechtspraak_metadata(
     # Input validation
     if dataframe is not None and filename is not None:
         logging.error("Provide either dataframe or filename, not both.")
-        return False
+        return None
 
     if dataframe is None and filename is None and save_file == SaveFileOption.NO.value:
         logging.error("Provide dataframe or filename when save_file='n'.")
-        return False
+        return None
 
     if save_file not in (SaveFileOption.YES.value, SaveFileOption.NO.value):
         logging.error(f"save_file must be 'y' or 'n', got '{save_file}'.")
-        return False
+        return None
 
     logging.info("Starting extraction with Rechtspraak metadata API")
     start_time = time.time()
@@ -610,7 +700,7 @@ def get_rechtspraak_metadata(
             method=method,
             sqlite_db_path=sqlite_db_path,
             fallback_to_api=fallback_to_api,
-            batch_size=batch_size,
+            multi_threading=multi_threading,
         )
 
     # Process all files in directory
@@ -622,10 +712,10 @@ def get_rechtspraak_metadata(
             method=method,
             sqlite_db_path=sqlite_db_path,
             fallback_to_api=fallback_to_api,
-            batch_size=batch_size,
+            multi_threading=multi_threading,
         )
 
-    return False
+    return None
 
 
 def _validate_data_source(data: pd.DataFrame, source_name: str = "DataFrame") -> bool:
@@ -661,7 +751,7 @@ def _process_single_source(
     method: str = "api",
     sqlite_db_path: str = "data/lido_metadata.db",
     fallback_to_api: bool = True,
-    batch_size: int = 100,
+    multi_threading: bool = True,
 ) -> Union[bool, pd.DataFrame]:
     """
     Process metadata extraction for a single source (file or dataframe).
@@ -683,7 +773,7 @@ def _process_single_source(
 
         if not file_path.exists():
             logging.error(f"File not found: {file_path}")
-            return False
+            return None
 
         data = pd.read_csv(file_path)
         source_name = f"File '{filename}'"
@@ -692,60 +782,29 @@ def _process_single_source(
         source_name = "DataFrame"
 
     if not _validate_data_source(data, source_name):
-        return False
+        return None
 
     # Check if metadata already exists
     if filename is not None:
         output_path = Path(data_dir) / (Path(filename).stem + METADATA_CSV_SUFFIX)
         if output_path.exists():
             logging.info(f"Metadata already exists: {output_path}")
-            return False
+            return None
 
     logging.info(f"Processing {len(data)} ECLIs...")
     num_eclis = len(data)
     ecli_list = data["id"].tolist()
 
     # Fetch metadata
-    if method == "sqlite":
-        logging.info(f"Extracting {len(ecli_list)} ECLIs via local SQLite database at {sqlite_db_path}")
-        metadata_df = fetch_eclis_via_sqlite(
-            ecli_list=ecli_list,
-            sqlite_db_path=sqlite_db_path,
-            columns=METADATA_COLUMNS,
-        )
-        
-        # Fallback check
-        if not metadata_df.empty:
-            found_eclis = set(metadata_df["ecli"].tolist())
-        else:
-            found_eclis = set()
-            
-        missing_eclis = [e for e in ecli_list if e not in found_eclis]
-        
-        if missing_eclis and fallback_to_api:
-            logging.info(f"SQLite returned {len(found_eclis)}/{len(ecli_list)} records. Falling back to API for {len(missing_eclis)} remaining ECLIs...")
-            fallback_df = fetch_eclis_in_parallel(
-                ecli_list=missing_eclis,
-                columns=METADATA_COLUMNS,
-                fake_headers=fake_headers,
-                data_dir=data_dir,
-            )
-            if not metadata_df.empty:
-                metadata_df = pd.concat([metadata_df, fallback_df], ignore_index=True)
-            else:
-                metadata_df = fallback_df
-        elif missing_eclis:
-            logging.warning(f"{len(missing_eclis)} ECLIs not found via SQLite and fallback is disabled.")
-            for ecli in missing_eclis:
-                save_data_when_crashed(ecli, data_dir)
-                
-    else:
-        metadata_df = fetch_eclis_in_parallel(
-            ecli_list=ecli_list,
-            columns=METADATA_COLUMNS,
-            fake_headers=fake_headers,
-            data_dir=data_dir,
-        )
+    metadata_df = _fetch_metadata_for_ecli_list(
+        ecli_list=ecli_list,
+        method=method,
+        sqlite_db_path=sqlite_db_path,
+        fallback_to_api=fallback_to_api,
+        fake_headers=fake_headers,
+        data_dir=data_dir,
+        multi_threading=multi_threading,
+    )
 
     # Merge with original data
     if not metadata_df.empty:
@@ -791,7 +850,7 @@ def _process_all_files_in_directory(
     method: str = "api",
     sqlite_db_path: str = "data/lido.db",
     fallback_to_api: bool = True,
-    batch_size: int = 100,
+    multi_threading: bool = True,
 ) -> bool:
     """
     Process metadata extraction for all CSV files in a directory.
@@ -832,44 +891,15 @@ def _process_all_files_in_directory(
             ecli_list = data["id"].tolist()
 
             # Fetch metadata
-            if method == "sqlite":
-                logging.info(f"Extracting {len(ecli_list)} ECLIs via local SQLite database at {sqlite_db_path}")
-                metadata_df = fetch_eclis_via_sqlite(
-                    ecli_list=ecli_list,
-                    sqlite_db_path=sqlite_db_path,
-                    columns=METADATA_COLUMNS,
-                )
-                
-                if not metadata_df.empty:
-                    found_eclis = set(metadata_df["ecli"].tolist())
-                else:
-                    found_eclis = set()
-                    
-                missing_eclis = [e for e in ecli_list if e not in found_eclis]
-                
-                if missing_eclis and fallback_to_api:
-                    logging.info(f"SQLite returned {len(found_eclis)}/{len(ecli_list)} records. Falling back to API for {len(missing_eclis)} remaining ECLIs...")
-                    fallback_df = fetch_eclis_in_parallel(
-                        ecli_list=missing_eclis,
-                        columns=METADATA_COLUMNS,
-                        fake_headers=fake_headers,
-                        data_dir=data_dir,
-                    )
-                    if not metadata_df.empty:
-                        metadata_df = pd.concat([metadata_df, fallback_df], ignore_index=True)
-                    else:
-                        metadata_df = fallback_df
-                elif missing_eclis:
-                    logging.warning(f"{len(missing_eclis)} ECLIs not found via SQLite and fallback is disabled.")
-                    for ecli in missing_eclis:
-                        save_data_when_crashed(ecli, data_dir)
-            else:
-                metadata_df = fetch_eclis_in_parallel(
-                    ecli_list=ecli_list,
-                    columns=METADATA_COLUMNS,
-                    fake_headers=fake_headers,
-                    data_dir=data_dir,
-                )
+            metadata_df = _fetch_metadata_for_ecli_list(
+                ecli_list=ecli_list,
+                method=method,
+                sqlite_db_path=sqlite_db_path,
+                fallback_to_api=fallback_to_api,
+                fake_headers=fake_headers,
+                data_dir=data_dir,
+                multi_threading=multi_threading,
+            )
 
             # Merge with original data
             if not metadata_df.empty:
