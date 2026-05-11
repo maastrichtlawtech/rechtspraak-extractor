@@ -51,40 +51,42 @@ TQDM_MAX_INTERVAL = 10000
 
 METADATA_COLUMNS = [
     "ecli",
-    "document_type",
+    "type",
     "date_decision",
-    "date_publication",
+    "issued",
     "language",
-    "instance",
-    "case_number",
-    "procedure_type",
+    "creator",
+    "zaaknummer",
+    "procedure",
     "spatial",
-    "citing",
-    "domains",
-    "alternative_publications",
+    "citations_outgoing",
+    "subject",
+    "hasVersion",
     "info",
     "full_text",
+    "inhoudsindicatie",
 ]
 
 METADATA_FIELD_MAPPING = {
-    "instance": "dcterms:creator",
+    "creator": "dcterms:creator",
     "date_decision": "dcterms:date",
-    "date_publication": "dcterms:issued",
-    "case_number": "psi:zaaknummer",
-    "document_type": "dcterms:type",
-    "domains": "dcterms:subject",
-    "citing": "dcterms:relation",
-    "procedure_type": "psi:procedure",
-    "alternative_publications": "dcterms:hasVersion",
+    "issued": "dcterms:issued",
+    "zaaknummer": "psi:zaaknummer",
+    "type": "dcterms:type",
+    "subject": "dcterms:subject",
+    "citations_outgoing": "dcterms:relation",
+    "procedure": "psi:procedure",
+    "hasVersion": "dcterms:hasVersion",
     "full_text": "uitspraak",
+    "inhoudsindicatie": "inhoudsindicatie",
     "info": "dcterms:description",
     "language": "dcterms:language",
     "spatial": "dcterms:spatial",
 }
 
 MULTIPLE_VALUE_FIELDS = {
-    "domains",
-    "case_number",
+    "subject",
+    "zaaknummer",
 }
 
 # Global lock for thread-safe file operations
@@ -387,14 +389,15 @@ def fetch_eclis_via_sqlite(
             chunk = ecli_list[i:i + chunk_size]
             placeholders = ",".join("?" * len(chunk))
             
-            # Match Case Law Explorer mapping directly
+            # Column names align with MAP_RS in the Case Law Explorer Airflow DAG
             query = f"""
-                SELECT 
-                    ecli, date_publication, language, instance, jurisdiction_city, 
-                    date_decision, case_number, document_type, procedure_type, 
-                    domains, referenced_legislation_titles, alternative_publications, 
-                    title, full_text, summary, citing, cited_by, legislations_cited, 
-                    predecessor_successor_cases, url_publications, info, source
+                SELECT
+                    ecli, issued, language, creator, jurisdiction_city,
+                    date_decision, zaaknummer, type, procedure,
+                    subject, "references", hasVersion,
+                    title, full_text, summary, citations_outgoing, citations_incoming,
+                    legislations_cited, predecessor_successor_cases, url_publications,
+                    info, source, inhoudsindicatie, bwb_id
                 FROM metadata
                 WHERE ecli IN ({placeholders})
             """
