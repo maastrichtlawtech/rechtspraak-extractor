@@ -78,7 +78,7 @@ def test_process_metadata_fields_extracts_known_fields(sample_ecli_xml):
     metadata, has_metadata = process_metadata_fields(soup, "ECLI:NL:HR:2020:1")
 
     assert has_metadata is True
-    assert metadata.get("instance") == "Hoge Raad"
+    assert metadata.get("creator") == "Hoge Raad"
     assert metadata.get("date_decision") == "2020-01-15"
     assert metadata.get("language") == "nl"
 
@@ -146,12 +146,12 @@ def test_fetch_eclis_via_sqlite_returns_matching_row(in_memory_sqlite_db):
     result = fetch_eclis_via_sqlite(
         ecli_list=["ECLI:NL:HR:2020:1"],
         sqlite_db_path=in_memory_sqlite_db,
-        columns=["ecli", "document_type", "date_decision"],
+        columns=["ecli", "type", "date_decision"],
     )
 
     assert len(result) == 1
     assert result.iloc[0]["ecli"] == "ECLI:NL:HR:2020:1"
-    assert result.iloc[0]["document_type"] == "Uitspraak"
+    assert result.iloc[0]["type"] == "Uitspraak"
 
 
 @pytest.mark.unit
@@ -159,7 +159,7 @@ def test_fetch_eclis_via_sqlite_unknown_ecli_returns_empty(in_memory_sqlite_db):
     result = fetch_eclis_via_sqlite(
         ecli_list=["ECLI:NL:INVALID:9999:0"],
         sqlite_db_path=in_memory_sqlite_db,
-        columns=["ecli", "document_type"],
+        columns=["ecli", "type"],
     )
 
     assert isinstance(result, pd.DataFrame)
@@ -180,8 +180,8 @@ def test_fetch_eclis_via_sqlite_nonexistent_db_returns_empty(tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("columns", [
-    ["ecli", "document_type"],
-    ["ecli", "document_type", "date_decision", "language", "instance"],
+    ["ecli", "type"],
+    ["ecli", "type", "date_decision", "language", "creator"],
 ])
 def test_fetch_eclis_via_sqlite_various_column_sets(in_memory_sqlite_db, columns):
     result = fetch_eclis_via_sqlite(
