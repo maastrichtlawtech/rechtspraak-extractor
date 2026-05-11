@@ -109,7 +109,7 @@ def test_sqlite_database_exists():
 def test_fetch_eclis_via_sqlite():
     """Test fetching metadata from SQLite database for known ECLIs."""
     test_eclis = ["ECLI:NL:RBDHA:2025:5366", "ECLI:NL:RBDHA:2025:5384"]
-    expected_columns = ["ecli", "document_type", "date_decision", "title"]
+    expected_columns = ["ecli", "type", "date_decision", "title"]
 
     metadata_df = fetch_eclis_via_sqlite(
         ecli_list=test_eclis,
@@ -127,18 +127,17 @@ def test_fetch_eclis_via_sqlite():
 @pytest.mark.integration
 @pytest.mark.parametrize("columns", [
     pytest.param(
-        ["ecli", "document_type", "date_decision", "title"],
+        ["ecli", "type", "date_decision", "title"],
         id="minimal",
     ),
     pytest.param(
         [
-            "ecli", "full_text", "creator", "date_decision", "issued", "zaaknummer",
-            "type", "relations", "references", "subject", "procedure", "inhoudsindicatie",
-            "hasVersion", "document_type", "date_publication", "language", "instance",
-            "jurisdiction_city", "case_number", "procedure_type", "domains",
-            "referenced_legislation_titles", "alternative_publications", "title",
-            "summary", "citing", "cited_by", "legislations_cited",
-            "predecessor_successor_cases", "url_publications", "info", "source",
+            "ecli", "issued", "language", "creator", "jurisdiction_city",
+            "date_decision", "zaaknummer", "type", "procedure",
+            "subject", "references", "hasVersion",
+            "title", "full_text", "summary", "citations_outgoing", "citations_incoming",
+            "legislations_cited", "predecessor_successor_cases", "url_publications",
+            "info", "source", "inhoudsindicatie", "bwb_id",
         ],
         id="full",
     ),
@@ -154,13 +153,13 @@ def test_fetch_eclis_via_sqlite_column_sets(columns):
     assert isinstance(metadata_df, pd.DataFrame)
     if len(metadata_df) > 0:
         assert "ecli" in metadata_df.columns
-        assert "document_type" in metadata_df.columns
+        assert "type" in metadata_df.columns
 
 
 @pytest.mark.integration
 def test_fetch_eclis_via_sqlite_nonexistent():
     """Test fetching non-existent ECLIs returns empty DataFrame."""
-    expected_columns = ["ecli", "document_type", "date_decision"]
+    expected_columns = ["ecli", "type", "date_decision"]
     metadata_df = fetch_eclis_via_sqlite(
         ecli_list=["ECLI:NL:INVALID:9999:0000"],
         sqlite_db_path="data/lido.db",
@@ -175,7 +174,7 @@ def test_fetch_eclis_via_sqlite_nonexistent():
 @pytest.mark.integration
 def test_fetch_eclis_via_sqlite_nonexistent_db():
     """Test handling of non-existent SQLite database."""
-    expected_columns = ["ecli", "document_type"]
+    expected_columns = ["ecli", "type"]
     metadata_df = fetch_eclis_via_sqlite(
         ecli_list=["ECLI:NL:RBDHA:2025:5366"],
         sqlite_db_path="data/nonexistent_db.db",
@@ -243,7 +242,7 @@ def test_sqlite_extraction_method_with_real_data():
         pytest.skip("CSV file is empty")
 
     test_eclis = df_csv.head(5)["id"].tolist()
-    sqlite_columns = ["ecli", "document_type", "date_decision", "date_publication", "title"]
+    sqlite_columns = ["ecli", "type", "date_decision", "issued", "title"]
 
     results = fetch_eclis_via_sqlite(
         ecli_list=test_eclis,
@@ -277,7 +276,7 @@ def test_sqlite_vs_csv_data_comparison():
         pytest.skip("CSV file is empty")
 
     test_eclis = df_csv.head(3)["id"].tolist()
-    sqlite_columns = ["ecli", "document_type", "date_decision", "title"]
+    sqlite_columns = ["ecli", "type", "date_decision", "title"]
 
     results = fetch_eclis_via_sqlite(
         ecli_list=test_eclis,
@@ -288,7 +287,7 @@ def test_sqlite_vs_csv_data_comparison():
     assert len(results) == len(test_eclis)
     for _, row in results.iterrows():
         assert row["ecli"] in test_eclis
-        assert row["document_type"]
+        assert row["type"]
         assert row["date_decision"]
 
     output_file = Path("data/test_sqlite_vs_csv_data_comparison.csv")
