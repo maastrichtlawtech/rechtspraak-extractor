@@ -99,32 +99,34 @@ def mock_api_response(sample_feed_xml: str) -> MagicMock:
 _SQLITE_SCHEMA = """
 CREATE TABLE metadata (
     ecli TEXT PRIMARY KEY,
-    date_publication TEXT,
+    issued TEXT,
     language TEXT,
-    instance TEXT,
+    creator TEXT,
     jurisdiction_city TEXT,
     date_decision TEXT,
-    case_number TEXT,
-    document_type TEXT,
-    procedure_type TEXT,
-    domains TEXT,
-    referenced_legislation_titles TEXT,
-    alternative_publications TEXT,
+    zaaknummer TEXT,
+    type TEXT,
+    procedure TEXT,
+    subject TEXT,
+    "references" TEXT,
+    hasVersion TEXT,
     title TEXT,
     full_text TEXT,
     summary TEXT,
-    citing TEXT,
-    cited_by TEXT,
+    citations_outgoing TEXT,
+    citations_incoming TEXT,
     legislations_cited TEXT,
     predecessor_successor_cases TEXT,
     url_publications TEXT,
     info TEXT,
-    source TEXT
+    source TEXT,
+    inhoudsindicatie TEXT,
+    bwb_id TEXT
 )
 """
 
 _SQLITE_SEED = """
-INSERT INTO metadata (ecli, document_type, date_decision, language, instance)
+INSERT INTO metadata (ecli, type, date_decision, language, creator)
 VALUES ('ECLI:NL:HR:2020:1', 'Uitspraak', '2020-01-15', 'nl', 'Hoge Raad')
 """
 
