@@ -46,3 +46,10 @@ namespaces = false
 [tool.setuptools_scm]
 write_to = "rechtspraak_extractor/_version.py"
 fallback_version = "0.0.0+unknown"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: fast, no network, no filesystem",
+    "integration: requires live API or real files",
+]
