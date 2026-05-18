@@ -101,13 +101,18 @@ def test_parse_json_entry_empty_summary_uses_default():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("bad_entry", [
-    {},
-    {"id": "X", "title": None},
-    None,
-])
+@pytest.mark.parametrize(
+    "bad_entry",
+    [
+        {},
+        {"id": "X", "title": None},
+        None,
+    ],
+)
 def test_parse_json_entry_bad_inputs_return_none(bad_entry):
-    result = _parse_json_entry(bad_entry) if bad_entry is not None else _parse_json_entry({})
+    result = (
+        _parse_json_entry(bad_entry) if bad_entry is not None else _parse_json_entry({})
+    )
     assert result is None
 
 
@@ -132,6 +137,7 @@ def test_check_api_returns_non_200(monkeypatch):
 def test_check_api_raises_on_request_exception(monkeypatch):
     def raise_exc(*a, **kw):
         raise requests.RequestException("fail")
+
     monkeypatch.setattr(requests, "get", raise_exc)
     with pytest.raises(requests.RequestException):
         check_api("http://fake-url")
@@ -204,6 +210,7 @@ def test_num_of_available_docs_extracts_count(monkeypatch):
 def test_num_of_available_docs_raises_on_request_failure(monkeypatch):
     def raise_exc(*a, **kw):
         raise requests.RequestException("timeout")
+
     monkeypatch.setattr(requests, "get", raise_exc)
     with pytest.raises(requests.RequestException):
         _num_of_available_docs("https://base.nl/?", "2020-01-01", "2020-12-31", 100)
@@ -215,6 +222,7 @@ def test_num_of_available_docs_raises_on_request_failure(monkeypatch):
 @pytest.mark.unit
 def test_save_csv_returns_dataframe_without_saving(tmp_path):
     import pandas as pd
+
     entries = [_VALID_ENTRY]
     df = save_csv(entries, "test_output", save_file="n")
     assert isinstance(df, pd.DataFrame)
@@ -226,6 +234,7 @@ def test_save_csv_returns_dataframe_without_saving(tmp_path):
 @pytest.mark.unit
 def test_save_csv_skips_unparseable_entries():
     import pandas as pd
+
     entries = [_VALID_ENTRY, {"bad": "entry"}]
     df = save_csv(entries, "test_output", save_file="n")
     assert isinstance(df, pd.DataFrame)
@@ -239,6 +248,7 @@ def test_save_csv_skips_unparseable_entries():
 def test_get_rechtspraak_returns_none_on_api_failure(monkeypatch):
     def raise_exc(*a, **kw):
         raise requests.RequestException("network error")
+
     monkeypatch.setattr(requests, "get", raise_exc)
     result = get_rechtspraak(max_ecli=10, sd="2020-01-01", save_file="n")
     assert result is None

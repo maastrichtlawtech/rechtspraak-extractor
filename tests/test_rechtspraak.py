@@ -30,7 +30,9 @@ def test_download_rechtspraak_returns_dataframe():
     assert df is not None, "Should return DataFrame"
     assert isinstance(df, pd.DataFrame), "Result should be pandas DataFrame"
     assert len(df) > 0, "DataFrame should contain data"
-    assert all(col in df.columns for col in ["id", "title", "link"]), "Should have required columns"
+    assert all(
+        col in df.columns for col in ["id", "title", "link"]
+    ), "Should have required columns"
 
 
 @pytest.mark.integration
@@ -50,12 +52,15 @@ def test_download_rechtspraak_saves_to_file():
 def test_metadata_extraction_from_api_data():
     """Test metadata extraction from downloaded API data."""
     df = get_rechtspraak(max_ecli=25, sd="2025-04-01", save_file="n")
-    metadata = get_rechtspraak_metadata(save_file="n", dataframe=df, _fake_headers=False)
+    metadata = get_rechtspraak_metadata(
+        save_file="n", dataframe=df, _fake_headers=False
+    )
 
     assert metadata is not None, "Should return metadata DataFrame"
     assert isinstance(metadata, pd.DataFrame), "Metadata should be DataFrame"
-    assert all(col in metadata.columns for col in ["ecli", "full_text", "creator"]), \
-        "Should have key metadata columns"
+    assert all(
+        col in metadata.columns for col in ["ecli", "full_text", "creator"]
+    ), "Should have key metadata columns"
 
     if len(metadata) > 0:
         output_file = Path("data/test_metadata_extraction_from_api_data.csv")
@@ -99,7 +104,9 @@ def test_sqlite_database_exists():
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'"
+    )
     result = cursor.fetchone()
     conn.close()
     assert result is not None, "Metadata table not found in SQLite database"
@@ -125,23 +132,44 @@ def test_fetch_eclis_via_sqlite():
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("columns", [
-    pytest.param(
-        ["ecli", "type", "date_decision", "title"],
-        id="minimal",
-    ),
-    pytest.param(
-        [
-            "ecli", "issued", "language", "creator", "jurisdiction_city",
-            "date_decision", "zaaknummer", "type", "procedure",
-            "subject", "references", "hasVersion",
-            "title", "full_text", "summary", "citations_outgoing", "citations_incoming",
-            "legislations_cited", "predecessor_successor_cases", "url_publications",
-            "info", "source", "inhoudsindicatie", "bwb_id",
-        ],
-        id="full",
-    ),
-])
+@pytest.mark.parametrize(
+    "columns",
+    [
+        pytest.param(
+            ["ecli", "type", "date_decision", "title"],
+            id="minimal",
+        ),
+        pytest.param(
+            [
+                "ecli",
+                "issued",
+                "language",
+                "creator",
+                "jurisdiction_city",
+                "date_decision",
+                "zaaknummer",
+                "type",
+                "procedure",
+                "subject",
+                "references",
+                "hasVersion",
+                "title",
+                "full_text",
+                "summary",
+                "citations_outgoing",
+                "citations_incoming",
+                "legislations_cited",
+                "predecessor_successor_cases",
+                "url_publications",
+                "info",
+                "source",
+                "inhoudsindicatie",
+                "bwb_id",
+            ],
+            id="full",
+        ),
+    ],
+)
 def test_fetch_eclis_via_sqlite_column_sets(columns):
     """Parametrized: fetch one known ECLI with minimal and full column sets."""
     metadata_df = fetch_eclis_via_sqlite(
@@ -195,7 +223,9 @@ def test_metadata_workflow_integration():
     df = get_rechtspraak(max_ecli=30, sd="2025-04-01", save_file="n")
 
     if df is not None and len(df) > 0:
-        metadata = get_rechtspraak_metadata(save_file="n", dataframe=df, _fake_headers=True)
+        metadata = get_rechtspraak_metadata(
+            save_file="n", dataframe=df, _fake_headers=True
+        )
         assert isinstance(metadata, pd.DataFrame)
         assert len(metadata) > 0
 
@@ -219,10 +249,13 @@ def test_metadata_extraction_sqlite_method():
     if "summary" not in test_df.columns:
         test_df["summary"] = ""
 
-    metadata = get_rechtspraak_metadata(save_file="n", dataframe=test_df, _fake_headers=False)
+    metadata = get_rechtspraak_metadata(
+        save_file="n", dataframe=test_df, _fake_headers=False
+    )
 
-    assert metadata is None or isinstance(metadata, pd.DataFrame), \
-        "Should return DataFrame or None on graceful failure"
+    assert metadata is None or isinstance(
+        metadata, pd.DataFrame
+    ), "Should return DataFrame or None on graceful failure"
 
     if isinstance(metadata, pd.DataFrame) and len(metadata) > 0:
         output_file = Path("data/test_metadata_extraction_sqlite_method.csv")

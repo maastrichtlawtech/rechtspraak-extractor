@@ -179,10 +179,13 @@ def test_fetch_eclis_via_sqlite_nonexistent_db_returns_empty(tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("columns", [
-    ["ecli", "type"],
-    ["ecli", "type", "date_decision", "language", "creator"],
-])
+@pytest.mark.parametrize(
+    "columns",
+    [
+        ["ecli", "type"],
+        ["ecli", "type", "date_decision", "language", "creator"],
+    ],
+)
 def test_fetch_eclis_via_sqlite_various_column_sets(in_memory_sqlite_db, columns):
     result = fetch_eclis_via_sqlite(
         ecli_list=["ECLI:NL:HR:2020:1"],
