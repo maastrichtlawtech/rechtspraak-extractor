@@ -175,7 +175,7 @@ def extract_data_from_xml(url: str, fake_headers: bool = False) -> Optional[byte
                 return response.read()
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
             if attempt < MAX_RETRIES - 1:
-                delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+                delay = RETRY_BASE_DELAY_SECONDS * (2**attempt)
                 logging.debug(
                     f"Retry {attempt + 1}/{MAX_RETRIES} for URL {url}: {type(e).__name__} — waiting {delay:.1f}s"
                 )
@@ -358,6 +358,7 @@ def report_no_metadata_eclis(
     else:
         return False, 0
 
+
 def fetch_eclis_via_sqlite(
     ecli_list: list[str],
     sqlite_db_path: str,
@@ -365,30 +366,34 @@ def fetch_eclis_via_sqlite(
 ) -> pd.DataFrame:
     """
     Fetches metadata for multiple ECLIs using a local pre-built SQLite DB.
-    
+
     Args:
         ecli_list: List of ECLIs to lookup.
         sqlite_db_path: Path to the SQLite database (built via build_lido_sqlite.py).
         columns: Expected column names.
-        
+
     Returns:
         DataFrame with fetched metadata.
     """
     if not os.path.exists(sqlite_db_path):
-        logging.error(f"SQLite database {sqlite_db_path} does not exist. Please run `build_lido_sqlite.py` or use method='api'.")
+        logging.error(
+            f"SQLite database {sqlite_db_path} does not exist. Please run `build_lido_sqlite.py` or use method='api'."
+        )
         return pd.DataFrame(columns=columns)
-        
+
     conn = sqlite3.connect(sqlite_db_path)
-    
+
     # Chunking query to not exceed SQLite variable limits (usually 999)
     chunk_size = SQLITE_CHUNK_SIZE
     all_results = []
-    
-    with tqdm(total=len(ecli_list), colour="YELLOW", desc="SQLite Extraction") as progress_bar:
+
+    with tqdm(
+        total=len(ecli_list), colour="YELLOW", desc="SQLite Extraction"
+    ) as progress_bar:
         for i in range(0, len(ecli_list), chunk_size):
-            chunk = ecli_list[i:i + chunk_size]
+            chunk = ecli_list[i : i + chunk_size]
             placeholders = ",".join("?" * len(chunk))
-            
+
             # Column names align with MAP_RS in the Case Law Explorer Airflow DAG
             query = f"""
                 SELECT
@@ -401,27 +406,28 @@ def fetch_eclis_via_sqlite(
                 FROM metadata
                 WHERE ecli IN ({placeholders})
             """
-            
+
             try:
                 # Let pandas parse it directly
                 df_chunk = pd.read_sql_query(query, conn, params=chunk)
-                
+
                 # Make sure we only grab requested columns and they exist
                 for col in columns:
                     if col not in df_chunk.columns:
                         df_chunk[col] = ""
-                        
+
                 all_results.append(df_chunk[columns])
             except Exception as e:
                 logging.error(f"SQLite query error: {e}")
-                
+
             progress_bar.update(len(chunk))
-            
+
     conn.close()
-    
+
     if all_results:
         return pd.concat(all_results, ignore_index=True)
     return pd.DataFrame(columns=columns)
+
 
 def _fetch_metadata_for_ecli_list(
     ecli_list: list[str],
@@ -458,7 +464,9 @@ def _fetch_metadata_for_ecli_list(
             sqlite_db_path=sqlite_db_path,
             columns=METADATA_COLUMNS,
         )
-        found_eclis = set(metadata_df["ecli"].tolist()) if not metadata_df.empty else set()
+        found_eclis = (
+            set(metadata_df["ecli"].tolist()) if not metadata_df.empty else set()
+        )
         missing_eclis = [e for e in ecli_list if e not in found_eclis]
 
         if missing_eclis and fallback_to_api:
@@ -466,7 +474,9 @@ def _fetch_metadata_for_ecli_list(
                 f"SQLite returned {len(found_eclis)}/{len(ecli_list)} records. "
                 f"Falling back to API for {len(missing_eclis)} remaining ECLIs..."
             )
-            fallback_df = _api_fetch(missing_eclis, fake_headers, data_dir, multi_threading)
+            fallback_df = _api_fetch(
+                missing_eclis, fake_headers, data_dir, multi_threading
+            )
             metadata_df = (
                 pd.concat([metadata_df, fallback_df], ignore_index=True)
                 if not metadata_df.empty
@@ -502,8 +512,14 @@ def _api_fetch(
         get_data_from_api(ecli, METADATA_COLUMNS, fake_headers, data_dir)
         for ecli in ecli_list
     ]
-    rows = [pd.DataFrame([r], columns=METADATA_COLUMNS) for r in results if r is not None]
-    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=METADATA_COLUMNS)
+    rows = [
+        pd.DataFrame([r], columns=METADATA_COLUMNS) for r in results if r is not None
+    ]
+    return (
+        pd.concat(rows, ignore_index=True)
+        if rows
+        else pd.DataFrame(columns=METADATA_COLUMNS)
+    )
 
 
 def fetch_eclis_in_parallel(
