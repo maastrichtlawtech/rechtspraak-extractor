@@ -21,6 +21,22 @@ METADATA_CSV_SUFFIX = "metadata"
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+def parse_xml_response(xml_text: str) -> dict:
+    """
+    Parse an XML string into a plain Python dict.
+
+    The round-trip through json.dumps/loads converts OrderedDict (from xmltodict)
+    into a standard dict for consistent access patterns.
+
+    Args:
+        xml_text: Raw XML string from an API response.
+
+    Returns:
+        Plain dict representation of the XML.
+    """
+    return json.loads(json.dumps(xmltodict.parse(xml_text)))
+
+
 def check_api(url: str) -> int:
     """
     Check whether the API is working and return the response code.
@@ -137,9 +153,7 @@ def _num_of_available_docs(
         response.raw.decode_content = True
 
         # Parse XML response
-        parsed_xml = xmltodict.parse(response.text)
-        json_string = json.dumps(parsed_xml)
-        json_object = json.loads(json_string)
+        json_object = parse_xml_response(response.text)
 
         # Extract document count from API response
         subtitle_text = json_object["feed"]["subtitle"]["#text"]

@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
@@ -18,11 +17,11 @@ from typing import Optional
 
 import pandas as pd
 import requests
-import xmltodict
 
 from rechtspraak_extractor.rechtspraak_functions import (
     check_api,
     get_exe_time,
+    parse_xml_response,
     _num_of_available_docs,
 )
 
@@ -133,9 +132,7 @@ def get_data_from_url(
             response.raw.decode_content = True
 
             # Parse XML to JSON
-            parsed_xml = xmltodict.parse(response.text)
-            json_string = json.dumps(parsed_xml)
-            json_object = json.loads(json_string)
+            json_object = parse_xml_response(response.text)
 
             entries = json_object.get("feed", {}).get("entry", [])
             # Ensure entries is a list
