@@ -97,6 +97,10 @@ def test_metadata_empty_dataframe():
 # SQLITE DATABASE TESTS
 # ============================================================================
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not Path("data/lido.db").exists(),
+    reason="data/lido.db not available on CI environments",
+)
 def test_sqlite_database_exists():
     """Verify SQLite database is available for testing."""
     db_path = "data/lido.db"
@@ -113,6 +117,10 @@ def test_sqlite_database_exists():
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not Path("data/lido.db").exists(),
+    reason="data/lido.db not available on CI environments",
+)
 def test_fetch_eclis_via_sqlite():
     """Test fetching metadata from SQLite database for known ECLIs."""
     test_eclis = ["ECLI:NL:RBDHA:2025:5366", "ECLI:NL:RBDHA:2025:5384"]
@@ -132,6 +140,10 @@ def test_fetch_eclis_via_sqlite():
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not Path("data/lido.db").exists(),
+    reason="data/lido.db not available on CI environments",
+)
 @pytest.mark.parametrize(
     "columns",
     [
@@ -185,6 +197,10 @@ def test_fetch_eclis_via_sqlite_column_sets(columns):
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not Path("data/lido.db").exists(),
+    reason="data/lido.db not available on CI environments",
+)
 def test_fetch_eclis_via_sqlite_nonexistent():
     """Test fetching non-existent ECLIs returns empty DataFrame."""
     expected_columns = ["ecli", "type", "date_decision"]
@@ -200,6 +216,10 @@ def test_fetch_eclis_via_sqlite_nonexistent():
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not Path("data/lido.db").exists(),
+    reason="data/lido.db not available on CI environments",
+)
 def test_fetch_eclis_via_sqlite_nonexistent_db():
     """Test handling of non-existent SQLite database."""
     expected_columns = ["ecli", "type"]
@@ -264,6 +284,10 @@ def test_metadata_extraction_sqlite_method():
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not Path("data/lido.db").exists(),
+    reason="data/lido.db not available on CI environments",
+)
 def test_sqlite_extraction_method_with_real_data():
     """Test SQLite extraction method using real ECLIs from CSV files."""
     csv_files = glob.glob("data/rechtspraak_*.csv")
@@ -298,6 +322,10 @@ def test_sqlite_extraction_method_with_real_data():
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not Path("data/lido.db").exists(),
+    reason="data/lido.db not available on CI environments",
+)
 def test_sqlite_vs_csv_data_comparison():
     """Compare SQLite retrieval with original CSV data."""
     csv_files = glob.glob("data/rechtspraak_*.csv")
