@@ -104,10 +104,11 @@ class SaveFileOption(Enum):
     YES = "y"
     NO = "n"
 
+
 class ExtractTextbySectionsOption(Enum):
     """
     Valid values for extract_text_by_sections parameter.
-    - If set to 'y', the case text will be extracted and split by sections found in the data. 
+    - If set to 'y', the case text will be extracted and split by sections found in the data.
     - If set to 'n', the full case text will be extracted as a single field.
     - Only supported when data extraction is via API, not SQLite.
     """
@@ -267,7 +268,11 @@ def save_no_metadata_ecli(ecli: str, data_dir: str = DEFAULT_DATA_DIR) -> None:
             logging.error(f"Failed to write no-metadata ECLI {ecli} to file: {e}")
 
 
-def process_metadata_fields(soup: BeautifulSoup, ecli_id: str, extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value) -> tuple[dict, bool]:
+def process_metadata_fields(
+    soup: BeautifulSoup,
+    ecli_id: str,
+    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value,
+) -> tuple[dict, bool]:
     """
     Extracts metadata fields from a BeautifulSoup object.
 
@@ -290,7 +295,10 @@ def process_metadata_fields(soup: BeautifulSoup, ecli_id: str, extract_text_by_s
                 items = soup.find_all(tag)
                 values = [get_text_if_exists(item, ecli_id) for item in items]
                 value = "\n".join(v for v in values if v)
-            elif field == "full_text" and extract_text_by_sections == ExtractTextbySectionsOption.YES.value:
+            elif (
+                field == "full_text"
+                and extract_text_by_sections == ExtractTextbySectionsOption.YES.value
+            ):
                 # Extract text split by sections using SectionExtractor
                 logging.info(f"Extracting full text by sections for ECLI {ecli_id}")
                 section_extractor = SectionExtractor(soup)
@@ -509,7 +517,9 @@ def _fetch_metadata_for_ecli_list(
             for ecli in missing_eclis:
                 save_data_when_crashed(ecli, data_dir)
     else:
-        metadata_df = _api_fetch(ecli_list, fake_headers, data_dir, multi_threading, extract_text_by_sections)
+        metadata_df = _api_fetch(
+            ecli_list, fake_headers, data_dir, multi_threading, extract_text_by_sections
+        )
 
     return metadata_df
 
@@ -519,7 +529,7 @@ def _api_fetch(
     fake_headers: bool,
     data_dir: str,
     multi_threading: bool,
-    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value
+    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value,
 ) -> pd.DataFrame:
     """Fetch metadata via API, using threads or sequentially based on multi_threading."""
     if multi_threading:
@@ -528,10 +538,12 @@ def _api_fetch(
             columns=METADATA_COLUMNS,
             fake_headers=fake_headers,
             data_dir=data_dir,
-            extract_text_by_sections=extract_text_by_sections
+            extract_text_by_sections=extract_text_by_sections,
         )
     results = [
-        get_data_from_api(ecli, METADATA_COLUMNS, fake_headers, data_dir, extract_text_by_sections)
+        get_data_from_api(
+            ecli, METADATA_COLUMNS, fake_headers, data_dir, extract_text_by_sections
+        )
         for ecli in ecli_list
     ]
     rows = [
@@ -549,7 +561,7 @@ def fetch_eclis_in_parallel(
     columns: list[str],
     fake_headers: bool = False,
     data_dir: str = DEFAULT_DATA_DIR,
-    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value
+    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value,
 ) -> pd.DataFrame:
     """
     Fetches metadata for multiple ECLIs in parallel using thread pool.
@@ -583,7 +595,7 @@ def fetch_eclis_in_parallel(
                     columns=columns,
                     fake_headers=fake_headers,
                     data_dir=data_dir,
-                    extract_text_by_sections=extract_text_by_sections
+                    extract_text_by_sections=extract_text_by_sections,
                 ): ecli
                 for ecli in ecli_list
             }
@@ -610,7 +622,7 @@ def get_data_from_api(
     columns: list[str],
     fake_headers: bool = False,
     data_dir: str = DEFAULT_DATA_DIR,
-    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value
+    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value,
 ) -> Optional[list]:
     """
     Fetches metadata for a single ECLI from the Rechtspraak API.
@@ -640,7 +652,9 @@ def get_data_from_api(
             return None
 
         soup = BeautifulSoup(xml_object, features="xml")
-        metadata_dict, has_metadata = process_metadata_fields(soup, ecli_id, extract_text_by_sections)
+        metadata_dict, has_metadata = process_metadata_fields(
+            soup, ecli_id, extract_text_by_sections
+        )
 
         # Check if any metadata was actually found
         if not has_metadata:
@@ -681,7 +695,7 @@ def get_rechtspraak_metadata(
     method: str = "api",
     sqlite_db_path: str = "data/lido_metadata.db",
     fallback_to_api: bool = True,
-    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value
+    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value,
 ) -> Optional[pd.DataFrame]:
     """
     Extracts metadata from the Rechtspraak API for a given dataset or file.
@@ -733,12 +747,22 @@ def get_rechtspraak_metadata(
         logging.error(f"save_file must be 'y' or 'n', got '{save_file}'.")
         return None
 
-    if extract_text_by_sections not in (ExtractTextbySectionsOption.YES.value, ExtractTextbySectionsOption.NO.value):
-        logging.error(f"extract_text_by_sections must be 'y' or 'n', got '{extract_text_by_sections}'.")
+    if extract_text_by_sections not in (
+        ExtractTextbySectionsOption.YES.value,
+        ExtractTextbySectionsOption.NO.value,
+    ):
+        logging.error(
+            f"extract_text_by_sections must be 'y' or 'n', got '{extract_text_by_sections}'."
+        )
         return None
 
-    if method == "sqlite" and extract_text_by_sections == ExtractTextbySectionsOption.YES.value:
-        logging.error("extract_text_by_sections='y' is not supported with method='sqlite'.")
+    if (
+        method == "sqlite"
+        and extract_text_by_sections == ExtractTextbySectionsOption.YES.value
+    ):
+        logging.error(
+            "extract_text_by_sections='y' is not supported with method='sqlite'."
+        )
         return None
 
     logging.info("Starting extraction with Rechtspraak metadata API")
@@ -811,7 +835,7 @@ def _process_single_source(
     sqlite_db_path: str = "data/lido_metadata.db",
     fallback_to_api: bool = True,
     multi_threading: bool = True,
-    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value
+    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value,
 ) -> Union[bool, pd.DataFrame]:
     """
     Process metadata extraction for a single source (file or dataframe).
@@ -865,7 +889,7 @@ def _process_single_source(
         fake_headers=fake_headers,
         data_dir=data_dir,
         multi_threading=multi_threading,
-        extract_text_by_sections=extract_text_by_sections
+        extract_text_by_sections=extract_text_by_sections,
     )
 
     # Merge with original data
@@ -913,7 +937,7 @@ def _process_all_files_in_directory(
     sqlite_db_path: str = "data/lido.db",
     fallback_to_api: bool = True,
     multi_threading: bool = True,
-    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value
+    extract_text_by_sections: str = ExtractTextbySectionsOption.NO.value,
 ) -> bool:
     """
     Process metadata extraction for all CSV files in a directory.
@@ -963,7 +987,7 @@ def _process_all_files_in_directory(
                 fake_headers=fake_headers,
                 data_dir=data_dir,
                 multi_threading=multi_threading,
-                extract_text_by_sections=extract_text_by_sections
+                extract_text_by_sections=extract_text_by_sections,
             )
 
             # Merge with original data
