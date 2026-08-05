@@ -559,7 +559,7 @@ def fetch_eclis_in_parallel(
         columns: Column names for the result DataFrame.
         fake_headers: Whether to use fake headers for requests.
         data_dir: The data directory for storing failed ECLIs.
-        extract_text_by_sections: Whether to extract case text split by sections.
+        extract_text_by_sections: Whether to extract case text split by sections or as a full text.
 
     Returns:
         DataFrame with fetched metadata (may be empty if all failed).
@@ -620,7 +620,7 @@ def get_data_from_api(
         columns: Expected column names for the result.
         fake_headers: Whether to use fake headers for the request.
         data_dir: The data directory for storing failed ECLIs.
-        extract_text_by_sections: Whether to extract case text split by sections or as a full text..
+        extract_text_by_sections: Whether to extract case text split by sections or as a full text.
 
     Returns:
         List of row data matching the columns, or None if extraction fails.

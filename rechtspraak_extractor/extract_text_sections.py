@@ -62,12 +62,14 @@ class SectionExtractor:
 
         for child in uitspraak_node_children:
             if child.name == "uitspraak.info":
+                # Extract the text from the <uitspraak.info> block and normalize it
                 info_text = self._normalize_xml_text(child.get_text(" ", strip=True))
                 if info_text:
                     text_split_by_sections["uitspraak.info"] = info_text
                 continue
 
             if child.name == "section":
+                # Extract the title of the <section> and normalize it
                 title_element = child.find("title", recursive=False) or child.find("title")
                 if title_element is None:
                     continue
@@ -76,7 +78,7 @@ class SectionExtractor:
                 if not title_text:
                     continue
                     
-                # Remove title from a copy, then use remaining content as body text.
+                # Remove title from a copy of the section text, then use remaining content as body text.
                 section_text_copy = BeautifulSoup(str(child), features="xml").find("section")
                 if section_text_copy is None:
                     continue
@@ -185,6 +187,8 @@ class SectionExtractor:
         - If it is not a title candidate, the current title remains unchanged, and all <para> texts are added to the current section.
         - If any subsequent <para> element is a title candidate, it becomes the new current title, and subsequent <para> texts are added to that section.
 
+        It updates the section_titles_text_lines dictionary with the extracted text lines under their respective section titles.
+        
         Args:
             parablock_tag: The <parablock> tag to process.
             section_titles_text_lines: Dictionary of section titles to list of text lines.
@@ -194,6 +198,7 @@ class SectionExtractor:
             The updated current active section title.
         
         """
+        # Extract all <para> elements within the <parablock> tag and normalize their text
         para_texts = [
             self._normalize_xml_text(para.get_text(" ", strip=True))
             for para in parablock_tag.find_all("para", recursive=False)
@@ -202,19 +207,21 @@ class SectionExtractor:
         if not para_texts:
             return current_title
 
+        # If the first <para> is a title candidate, set it as the current title and add subsequent lines to that section
         if self._is_title_candidate(para_texts[0]):
             current_title = self._clean_title_text(para_texts[0])
             section_titles_text_lines.setdefault(current_title, [])
             for line in para_texts[1:]:
                 self._add_line(section_titles_text_lines, current_title, line)
             return current_title
-
+        # If the first <para> is not a title candidate, add all lines to the current section and check for subsequent title candidates
         for line in para_texts:
             if self._is_title_candidate(line):
                 current_title = self._clean_title_text(line)
                 section_titles_text_lines.setdefault(current_title, [])
             else:
                 self._add_line(section_titles_text_lines, current_title, line)
+
         return current_title
 
     def _extract_text_sections_rule_based(
@@ -236,6 +243,7 @@ class SectionExtractor:
 
         for child in uitspraak_node_children:
             if child.name == "parablock":
+                # Update the section_titles_text_lines dictionary and retrieve the updated current_title based on the <parablock> tag processing
                 current_title = self._read_parablock_tag(
                     child,
                     section_titles_text_lines,
@@ -244,10 +252,12 @@ class SectionExtractor:
                 continue
 
             if child.name == "para":
+                # Get the normalized text of the <para> element and skip if it's empty
                 para_text = self._normalize_xml_text(child.get_text(" ", strip=True))
                 if not para_text:
                     continue
-
+                # If the <para> text is a title candidate, set it as the current title and initialize its entry in the dictionary; 
+                # Otherwise, add the text to the current section
                 if self._is_title_candidate(para_text):
                     current_title = self._clean_title_text(para_text)
                     section_titles_text_lines.setdefault(current_title, [])
@@ -255,9 +265,11 @@ class SectionExtractor:
                     self._add_line(section_titles_text_lines, current_title, para_text)
                 continue
 
+            # For any other child elements, treat their text as fallback text and add it to the current section
             fallback_text = self._normalize_xml_text(child.get_text(" ", strip=True))
             self._add_line(section_titles_text_lines, current_title, fallback_text)
 
+        # After processing all children, join the lines for each section and normalize the text before returning the final dictionary
         return {
             title: self._normalize_xml_text(" ".join(lines))
             for title, lines in section_titles_text_lines.items()

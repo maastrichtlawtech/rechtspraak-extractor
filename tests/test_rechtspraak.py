@@ -81,7 +81,8 @@ def test_metadata_extraction_full_text_by_sections():
     assert all(
         col in metadata.columns for col in ["ecli", "full_text", "creator"]
     ), "Should have key metadata columns"
-    # If full_text columns contains values, they should be dictionaries when extracted by sections
+    # Data in full_text column should be a dictionary when extracted by sections, or empty if no sections found
+    # It can be empty when data is not published for a certain ECLI
     assert metadata['full_text'].apply(lambda x: isinstance(x, dict) or x == '').all(), "Full_text column should be a dictionary or empty when extracted by sections"
     if len(metadata) > 0:
         output_file = Path("data/test_metadata_extraction_from_api_data.csv")
