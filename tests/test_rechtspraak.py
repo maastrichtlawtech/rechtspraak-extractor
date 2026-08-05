@@ -69,6 +69,27 @@ def test_metadata_extraction_from_api_data():
 
 
 @pytest.mark.integration
+def test_metadata_extraction_full_text_by_sections():
+    """Test extraction of metadata when full text is extracted by sections."""
+    df = get_rechtspraak(max_ecli=25, sd="2025-04-01", save_file="n")
+    metadata = get_rechtspraak_metadata(
+        save_file="n", dataframe=df[29:30], _fake_headers=False, extract_text_by_sections='y'
+    )
+
+    assert metadata is not None, "Should return metadata DataFrame"
+    assert isinstance(metadata, pd.DataFrame), "Metadata should be DataFrame"
+    assert all(
+        col in metadata.columns for col in ["ecli", "full_text", "creator"]
+    ), "Should have key metadata columns"
+    # If full_text columns contains values, they should be dictionaries when extracted by sections
+    assert metadata['full_text'].apply(lambda x: isinstance(x, dict) or x == '').all(), "Full_text column should be a dictionary or empty when extracted by sections"
+    if len(metadata) > 0:
+        output_file = Path("data/test_metadata_extraction_from_api_data.csv")
+        metadata.to_csv(output_file, index=False)
+        assert output_file.exists()
+
+
+@pytest.mark.integration
 def test_metadata_extraction_and_save():
     """Test metadata extraction with file saving."""
     df = get_rechtspraak(max_ecli=25, sd="2025-04-01", save_file="n")
