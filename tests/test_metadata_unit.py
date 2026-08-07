@@ -4,6 +4,7 @@ Unit tests for rechtspraak_metadata.py.
 All tests are isolated — no real network calls, no real filesystem writes
 (except tests that use tmp_path for file-write verification).
 """
+
 from __future__ import annotations
 
 import urllib.error
@@ -89,20 +90,20 @@ def test_process_metadata_fields_extracts_full_text(sample_ecli_xml):
 
     # Test that full text is extracted correctly when extract_text_by_sections is 'no'
     metadata, has_metadata = process_metadata_fields(
-        soup, 
+        soup,
         "ECLI:NL:HR:2020:1",
-        extract_text_by_sections=ExtractTextbySectionsOption.NO.value
+        extract_text_by_sections=ExtractTextbySectionsOption.NO.value,
     )
     assert metadata.get("full_text", "") == "Full decision text here."
 
     # Test that full text is extracted correctly when extract_text_by_sections is 'yes'
     # As there are no sections in the sample XML, it should return a dictionary with a single key 'full_text'
     metadata, has_metadata = process_metadata_fields(
-        soup, 
-        "ECLI:NL:HR:2020:1", 
-        extract_text_by_sections=ExtractTextbySectionsOption.YES.value
+        soup,
+        "ECLI:NL:HR:2020:1",
+        extract_text_by_sections=ExtractTextbySectionsOption.YES.value,
     )
-    assert metadata.get("full_text", "") == {'full_text': 'Full decision text here.'}
+    assert metadata.get("full_text", "") == {"full_text": "Full decision text here."}
 
 
 @pytest.mark.unit
