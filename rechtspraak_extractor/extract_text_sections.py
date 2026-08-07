@@ -21,18 +21,23 @@ class SectionExtractor:
         2. Rule-based extraction, which identifies section titles based on specific patterns and rules.
     The extracted text is returned as a dictionary where keys are section titles and values are the corresponding text content.
     """
-    def __init__(self, soup_parsed_xml: BeautifulSoup, known_section_titles: set[str]) -> None:
+
+    def __init__(
+        self,
+        soup_parsed_xml: BeautifulSoup,
+        known_section_titles: Optional[set[str]] = None,
+    ) -> None:
         """
         Args:
             soup_parsed_xml: A BeautifulSoup object representing the parsed XML document.
-            known_section_titles: A set of known section titles to assist in identifying sections.
+            known_section_titles: Optional set of known section titles used to assist
+                section detection.
         """
         self.soup_parsed_xml = soup_parsed_xml
         # Clean the known section titles for improved matching
         # Each title candidate found in the XML is similarly cleaned before matching against this set
         self.known_section_titles = {
-            self._clean_title_text(title)
-            for title in known_section_titles
+            self._clean_title_text(title) for title in known_section_titles or set()
         }
 
     @staticmethod
@@ -63,9 +68,11 @@ class SectionExtractor:
         Returns:
             The resolved section title.
         """
-        title_element = section_tag.find("title", recursive=False) or section_tag.find("title")
+        title_element = section_tag.find("title", recursive=False)
         if title_element is not None:
-            title_text = self._normalize_xml_text(title_element.get_text(" ", strip=True))
+            title_text = self._normalize_xml_text(
+                title_element.get_text(" ", strip=True)
+            )
             if title_text:
                 return title_text
 
@@ -80,7 +87,7 @@ class SectionExtractor:
     def _clean_title_text(self, title_text: str) -> str:
         """
         Cleans a section title by removing leading numbers, Roman numerals, and punctuation and lowercasing the text.
-        
+
         Args:
             title_text: The title text to clean.
 
@@ -103,9 +110,9 @@ class SectionExtractor:
 
     def _add_line(
         self,
-        section_titles_text_lines: dict[str, list[str]], 
-        current_title: Optional[str], 
-        text: str
+        section_titles_text_lines: dict[str, list[str]],
+        current_title: Optional[str],
+        text: str,
     ) -> None:
         """
         Appends non-empty normalized text to the active section.
@@ -142,36 +149,18 @@ class SectionExtractor:
         """
         # Initialize dictionary of section titles to list of text lines and current active title
         section_titles_text_lines: dict[str, list[str]] = {}
-        current_title: Optional[str] = None
-
         for child in uitspraak_node_children:
             if child.name == "uitspraak.info":
                 # Extract text from <uitspraak.info> and append it to the "uitspraak.info" section in the accumulator
                 info_text = self._normalize_xml_text(child.get_text(" ", strip=True))
                 if info_text:
-                    section_titles_text_lines.setdefault("uitspraak.info", []).append(info_text)
+                    section_titles_text_lines.setdefault("uitspraak.info", []).append(
+                        info_text
+                    )
                 continue
 
             if child.name == "section":
-                # Resolve section title and ensure it exists in the accumulator
-                current_title = self._get_section_title(child)
-                # Clean the title text to avoid duplicates due to formatting differences
-                current_title = self._clean_title_text(current_title)
-                # If current_title is already in the dictionary, then it will not be overwritten
-                # If it is not in the dictionary, it will be initialized with an empty list
-                section_titles_text_lines.setdefault(current_title, [])
-
-                # Remove title from a copy of the section text, then add body text to current section
-                section_text_copy = BeautifulSoup(str(child), features="xml").find("section")
-                if section_text_copy is None:
-                    continue
-
-                copied_title = section_text_copy.find("title")
-                if copied_title is not None:
-                    copied_title.decompose()
-
-                body_text = self._normalize_xml_text(section_text_copy.get_text(" ", strip=True))
-                self._add_line(section_titles_text_lines, current_title, body_text)
+                self._extract_standard_section(child, section_titles_text_lines)
                 continue
 
         # After processing all children, join the lines for each section and normalize the text before returning the final dictionary
@@ -181,6 +170,41 @@ class SectionExtractor:
             if lines
         }
 
+    def _extract_standard_section(
+        self,
+        section_tag: Tag,
+        section_titles_text_lines: dict[str, list[str]],
+    ) -> None:
+        """Extract one standard section and recursively extract its child sections."""
+        current_title = self._clean_title_text(self._get_section_title(section_tag))
+        section_titles_text_lines.setdefault(current_title, [])
+
+        section_text_copy = BeautifulSoup(str(section_tag), features="xml").find(
+            "section"
+        )
+        if section_text_copy is not None:
+            copied_title = section_text_copy.find("title", recursive=False)
+            if copied_title is not None:
+                copied_title.decompose()
+
+            # Child sections are extracted separately and must not be duplicated in
+            # the parent section's body.
+            for nested_section in section_text_copy.find_all(
+                "section", recursive=False
+            ):
+                nested_section.decompose()
+
+            body_text = self._normalize_xml_text(
+                section_text_copy.get_text(" ", strip=True)
+            )
+            self._add_line(section_titles_text_lines, current_title, body_text)
+
+        for nested_section in section_tag.find_all("section", recursive=False):
+            self._extract_standard_section(
+                nested_section,
+                section_titles_text_lines,
+            )
+
     def _match_title_candidate(self, text: str) -> bool:
         """
         Checks whether text matches a known section title.
@@ -188,7 +212,7 @@ class SectionExtractor:
         Cleaning steps before matching to improve match rate:
             - keep only letters and spaces
             - remove numbers, punctuation, underscores, and symbols
-        
+
         Args:
             text: The text string to check.
 
@@ -200,7 +224,7 @@ class SectionExtractor:
         cleaned_text = self._normalize_xml_text(cleaned_text)
         if not cleaned_text:
             return False
-        
+
         return cleaned_text in self.known_section_titles
 
     def _is_title_candidate(self, text: str) -> bool:
@@ -223,7 +247,7 @@ class SectionExtractor:
         # In some cases, non-section titles can agree to the rules below but are too long to be a title.
         max_title_words = 10
         # Examples: "1 De procedure", "1. De procedure", "2) De procedure"
-        numeric_title_pattern = re.compile(r"^\s*\d(?:[.)]\s|\s)\S")
+        numeric_title_pattern = re.compile(r"^\s*\d+(?:[.)]\s|\s)\S")
         # Examples: "I. ONTSTAAN EN LOOP VAN HET GEDING", "II. MOTIVERING"
         roman_title_pattern = re.compile(r"^\s*[IVXLCDM]+(?:\.\s|\s)\S", re.IGNORECASE)
 
@@ -236,11 +260,18 @@ class SectionExtractor:
         words = normalized_title_text.split()
         if len(words) > max_title_words:
             return False
+        if normalized_title_text.endswith(":"):
+            return True
+        # Short numbered sentences occur frequently in older Rechtspraak XML.
+        # Sentence-ending punctuation is a strong signal that the paragraph is
+        # body text unless it matched a known title above.
+        if normalized_title_text.endswith((".", "!", "?", ";", ",")):
+            return False
         if numeric_title_pattern.match(normalized_title_text):
             return True
         if roman_title_pattern.match(normalized_title_text):
             return True
-        return bool(normalized_title_text.endswith(":"))
+        return False
 
     def _read_para_tag(
         self,
@@ -269,7 +300,7 @@ class SectionExtractor:
         if not para_text:
             return current_title
 
-        # If the <para> text is a title candidate, set it as the current title and initialize its entry in the dictionary 
+        # If the <para> text is a title candidate, set it as the current title and initialize its entry in the dictionary
         # Otherwise, add the text to the current section
         if self._is_title_candidate(para_text):
             current_title = self._clean_title_text(para_text)
@@ -300,14 +331,20 @@ class SectionExtractor:
                 # Process each direct <para> in the <parablock> through the para reader
                 para_tags = child.find_all("para", recursive=False)
                 for para in para_tags:
-                    current_title = self._read_para_tag(para, section_titles_text_lines, current_title)
+                    current_title = self._read_para_tag(
+                        para, section_titles_text_lines, current_title
+                    )
 
             elif child.name == "para":
-                current_title = self._read_para_tag(child, section_titles_text_lines, current_title)
+                current_title = self._read_para_tag(
+                    child, section_titles_text_lines, current_title
+                )
 
             else:
-                # For any other child elements, treat their text as fallback text 
-                fallback_text = self._normalize_xml_text(child.get_text(" ", strip=True))
+                # For any other child elements, treat their text as fallback text
+                fallback_text = self._normalize_xml_text(
+                    child.get_text(" ", strip=True)
+                )
                 self._add_line(section_titles_text_lines, current_title, fallback_text)
 
         # After processing all children, join the lines for each section and normalize the text before returning the final dictionary
