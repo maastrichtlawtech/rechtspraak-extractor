@@ -1,6 +1,7 @@
 """
 Contains class to extract case text by sections from a parsed XML document.
 """
+
 import logging
 import re
 from typing import Optional
@@ -9,6 +10,7 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 
 logger = logging.getLogger(__name__)
+
 
 class SectionExtractor:
     """
@@ -37,7 +39,7 @@ class SectionExtractor:
     def _normalize_xml_text(text: str) -> str:
         """
         Normalizes XML text by collapsing repeated whitespace.
-        
+
         Args:
             text: The text to normalize.
 
@@ -121,11 +123,10 @@ class SectionExtractor:
             section_titles_text_lines[current_title].append(cleaned_text)
 
     def _extract_text_sections_standard_format(
-        self,
-        uitspraak_node_children: list[Tag]
+        self, uitspraak_node_children: list[Tag]
     ) -> dict[str, str]:
         """
-        Extracts case text grouped by logical XML sections. 
+        Extracts case text grouped by logical XML sections.
             - It is designed for XML documents that follow the standard Rechtspraak XML structure.
             - Most documents follow this structure after the introduction of ECLI in 2013
         (https://www.rechtspraak.nl/binaries/_rts_1768910542320/content/assets/ivo/wi/ivo-wi-technische-documentatie-open-data-van-de-rechtspraak.pdf).
@@ -213,12 +214,12 @@ class SectionExtractor:
 
         Args:
             text: The text string to check.
-        
+
         Returns:
             True if the text is a section title candidate, False otherwise.
         """
         # Constants for rule based title detection
-        # Maximum number of words allowed in a title. 
+        # Maximum number of words allowed in a title.
         # In some cases, non-section titles can agree to the rules below but are too long to be a title.
         max_title_words = 10
         # Examples: "1 De procedure", "1. De procedure", "2) De procedure"
@@ -253,7 +254,7 @@ class SectionExtractor:
         - If it is not a title candidate, the current title remains unchanged, and the <para> text is added to the current section.
 
         It updates the section_titles_text_lines dictionary with the extracted text lines under their respective section titles.
-        
+
         Args:
             para: The <para> tag to process.
             section_titles_text_lines: Dictionary of section titles to list of text lines.
@@ -261,7 +262,7 @@ class SectionExtractor:
 
         Returns:
             The updated current active section title.
-        
+
         """
         # Get the normalized text of the <para> element and skip if it's empty
         para_text = self._normalize_xml_text(para.get_text(" ", strip=True))
@@ -279,8 +280,7 @@ class SectionExtractor:
         return current_title
 
     def _extract_text_sections_rule_based(
-        self,
-        uitspraak_node_children: list[Tag]
+        self, uitspraak_node_children: list[Tag]
     ) -> dict[str, str]:
         """
         Extracts text by section titles from an XML <uitspraak> node.
@@ -328,7 +328,9 @@ class SectionExtractor:
         Returns:
             True if the section text contains meaningful sections, False otherwise.
         """
-        return bool(text_split_by_sections) and set(text_split_by_sections.keys()) != {"uitspraak.info"}
+        return bool(text_split_by_sections) and set(text_split_by_sections.keys()) != {
+            "uitspraak.info"
+        }
 
     def extract_text_sections(self) -> dict[str, str]:
         """
@@ -339,42 +341,62 @@ class SectionExtractor:
         Returns:
             A dictionary where keys are section titles and values are the corresponding text content.
         """
-        logger.info("Starting text extraction by sections from the parsed XML document using SectionExtractor.")
+        logger.info(
+            "Starting text extraction by sections from the parsed XML document using SectionExtractor."
+        )
         # Find the <uitspraak> node in the XML document which contains the information and case text
         uitspraak_node = self.soup_parsed_xml.find("uitspraak")
         if uitspraak_node is None:
-            logger.warning("No <uitspraak> node found in the XML document. Returning empty text.")
-            return {'full_text': ""}
+            logger.warning(
+                "No <uitspraak> node found in the XML document. Returning empty text."
+            )
+            return {"full_text": ""}
 
         # Check the children of the <uitspraak> node to determine if it has a standard structure or if rule-based extraction is needed
-        children = [child for child in uitspraak_node.children if isinstance(child, Tag)]
+        children = [
+            child for child in uitspraak_node.children if isinstance(child, Tag)
+        ]
 
         # If the <uitspraak> node has no children, return the full text of the <uitspraak> node as a single section
         if not children:
-            full_text = self._normalize_xml_text(uitspraak_node.get_text(" ", strip=True))
+            full_text = self._normalize_xml_text(
+                uitspraak_node.get_text(" ", strip=True)
+            )
             logger.info("Sections not found. Returning full text as a single section.")
-            return {'full_text': full_text}
+            return {"full_text": full_text}
 
         # If there is a section tag then extract sections using the standard XML structure method
         if any(child.name == "section" for child in children):
-            text_split_by_sections = self._extract_text_sections_standard_format(children)
-            logger.info("Sections extracted from full text using the standard XML structure method.")
-        # If there is no section tag, use the rule-based extraction method  
+            text_split_by_sections = self._extract_text_sections_standard_format(
+                children
+            )
+            logger.info(
+                "Sections extracted from full text using the standard XML structure method."
+            )
+        # If there is no section tag, use the rule-based extraction method
         elif any(child.name in ["parablock", "para"] for child in children):
             text_split_by_sections = self._extract_text_sections_rule_based(children)
-            logger.info("Sections extracted from full text using the rule-based extraction method.")
+            logger.info(
+                "Sections extracted from full text using the rule-based extraction method."
+            )
         # If none of the above conditions are met, return the full text of the <uitspraak> node as a single section
         else:
-            full_text = self._normalize_xml_text(uitspraak_node.get_text(" ", strip=True))
+            full_text = self._normalize_xml_text(
+                uitspraak_node.get_text(" ", strip=True)
+            )
             logger.info("Sections not found. Returning full text as a single section.")
-            return {'full_text': full_text}
+            return {"full_text": full_text}
 
         # If no sections or only the uitspraak.info was extracted using the standard XML structure method or rule-based extraction
         # This happens when no section titles were found (most likely) or the <uitspraak> node only contains the <uitspraak.info> block (unlikely)
         # Return the full text of the <uitspraak> node as a single section
         if not self._has_meaningful_sections(text_split_by_sections):
-            full_text = self._normalize_xml_text(uitspraak_node.get_text(" ", strip=True))
-            logger.info("Sections not found or only <uitspraak.info> extracted. Returning full text as a single section.")
+            full_text = self._normalize_xml_text(
+                uitspraak_node.get_text(" ", strip=True)
+            )
+            logger.info(
+                "Sections not found or only <uitspraak.info> extracted. Returning full text as a single section."
+            )
             return {"full_text": full_text}
 
         return text_split_by_sections

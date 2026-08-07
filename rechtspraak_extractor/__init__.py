@@ -14,5 +14,5 @@ __all__ = [
     "rechtspraak",
     "rechtspraak_metadata",
     "rechtspraak_functions",
-    "SectionExtractor"
+    "SectionExtractor",
 ]
