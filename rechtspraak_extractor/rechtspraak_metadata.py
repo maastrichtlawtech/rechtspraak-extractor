@@ -30,7 +30,6 @@ from threading import Lock
 from tqdm import tqdm
 import sqlite3
 
-
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -93,14 +92,12 @@ MULTIPLE_VALUE_FIELDS = {
 
 # Get the known section titles, which is a user input from the config file
 # It is passed to the SectionExtractor class when extracting case text by sections
-config_path = Path(__file__).resolve().parent.parent / "config.yml"
+config_path = Path(__file__).resolve().with_name("config.yml")
 config_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 section_title_known_groups = config_data["section_title_known_groups"]
 # Flatten all section titles into a single set
 KNOWN_SECTION_TITLES = {
-    title
-    for titles in section_title_known_groups.values()
-    for title in titles
+    title for titles in section_title_known_groups.values() for title in titles
 }
 
 # Global lock for thread-safe file operations
