@@ -73,7 +73,7 @@ def test_metadata_extraction_full_text_by_sections():
     """Test extraction of metadata when full text is extracted by sections."""
     df = get_rechtspraak(max_ecli=25, sd="2025-04-01", save_file="n")
     metadata = get_rechtspraak_metadata(
-        save_file="n", dataframe=df[29:30], _fake_headers=False, extract_text_by_sections='y'
+        save_file="n", dataframe=df, _fake_headers=False, extract_text_by_sections='y'
     )
 
     assert metadata is not None, "Should return metadata DataFrame"

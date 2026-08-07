@@ -1,0 +1,173 @@
+# Expected section titles used to identify sections in Rechtspraak case text
+section_title_known_groups:
+  wettelijk kader:
+    - wettelijk kader
+    - toepasselijke wettelijke voorschriften
+    - de wettelijke voorschriften
+    - toepassende wetsbepalingen
+    - toepasselijke wetsartikelen
+    - de toegepaste wettelijke voorschriften
+    - de toepasselijke wetsartikelen
+    - de toegepaste wettelijke bepalingen
+
+  proceskosten:
+    - proceskosten
+    - griffierecht en proceskosten
+    - kosten
+    - proceskosten en griffierecht
+
+  procesverloop:
+    - procesverloop
+    - de procedure
+    - het geding in hoger beroep
+    - het procesverloop
+    - het geding in eerste aanleg
+    - ontstaan en loop van het geding
+    - procesgang
+    - procesverloop in cassatie
+    - het verloop van de procedure
+    - het verloop van het geding in eerste aanleg
+    - het verdere verloop van het geding in hoger beroep
+    - het verloop van het geding
+    - het verloop van de procedure in hoger beroep
+    - de procedure in hoger beroep
+    - procesverloop in hoger beroep
+    - procedure
+    - het verdere verloop van de procedure in hoger beroep
+    - het verdere verloop van de procedure
+    - de procedure bij de rechtbank
+    - de procedure in eerste aanleg
+    - verloop van de procedure
+    - het verdere procesverloop
+    - procedure bij de rechtbank
+    - het geschil en de beslissing in eerste aanleg
+
+  context:
+    - context overig
+    - voorvragen
+    - de voorvragen
+    - inleiding
+    - grondslag en inhoud van het eab
+    - onderzoek van de zaak
+    - het onderzoek ter terechtzitting
+    - onderzoek ter terechtzitting
+    - gronden
+    - het onderzoek op de terechtzitting
+    - onderzoek op de terechtzitting
+    - de kern van de zaak
+    - waar gaat deze zaak over?
+    - inleiding en samenvatting
+    - waar gaat het over?
+    - het bewijs
+    - waar gaat de zaak over?
+
+  feiten:
+    - feiten
+    - de feiten
+    - de zaak in het kort
+    - de vaststaande feiten
+    - vaststaande feiten
+    - uitgangspunten en feiten
+    - feiten en procesverloop
+    - feitelijke achtergrond
+    - uitgangspunten in cassatie
+
+  beoordeling:
+    - beoordeling
+    - beoordeling door rechter
+    - de beoordeling
+    - waardering van het bewijs
+    - de motivering van de beslissing
+    - bewezenverklaring
+    - de beoordeling van het bewijs
+    - de verdere beoordeling
+    - beoordeling van het geschil
+    - de strafbaarheid van de verdachte
+    - strafbaarheid van verdachte
+    - de strafbaarheid van verdachte
+    - de strafbaarheid
+    - beoordeling door de rechtbank
+    - strafbaarheid
+    - beoordeling van het middel
+    - strafbaarheid van de feiten
+    - de strafbaarheid van het bewezenverklaarde
+    - conclusie en gevolgen
+    - de bewezenverklaring
+    - de strafbaarheid van de feiten
+    - de strafbaarheid van het bewezen verklaarde
+    - beoordeling van het cassatiemiddel
+    - beoordeling van de middelen
+    - bespreking van het cassatiemiddel
+    - de bewijsmotivering
+    - beoordeling van het bewijs
+    - strafbaarheid verdachte
+    - de motivering van de beslissing in hoger beroep
+    - beoordeling van de ontvankelijkheid van het beroep in cassatie
+    - de bewijsbeslissing
+    - de kwalificatie van het bewezenverklaarde
+    - strafbaarheid van de verdachte
+    - de gronden van de beslissing
+    - motivering van de straf
+    - de strafbaarheid van het feit
+    - de beoordeling van het geschil
+    - strafbaarheid van het feit
+    - motivering straf
+    - motivering van de sanctie
+    - het oordeel van de rechtbank
+    - de beoordeling in het incident
+    - beoordeling van de klachten
+    - de beoordeling in hoger beroep
+    - overwegingen
+    - kwalificatie en strafbaarheid van de feiten
+    - beoordeling van de cassatiemiddelen
+    - beoordeling van het eerste cassatiemiddel
+    - strafbaarheid feiten
+    - de overwegingen ten aanzien van straf en/of maatregel
+    - beoordeling van het tweede cassatiemiddel
+    - beoordeling in hoger beroep
+    - strafbaarheid feit
+    - motivering van de straffen en maatregelen
+    - kwalificatie en strafbaarheid van het feit
+    - de beoordeling in conventie en in reconventie
+    - het geschil in reconventie
+    - de straf en/of de maatregel
+    - bewijs
+    - het eerste middel
+    - de beoordeling van de civiele vordering
+
+  beslissing:
+    - beslissing
+    - de beslissing
+    - slotsom
+    - de uitspraak
+    - de slotsom
+    - de strafoplegging
+    - conclusie
+    - oplegging van straf
+    - de op te leggen straf of maatregel
+    - vrijspraak
+    - de straf
+
+  proceshandelingen partijen:
+    - proceshandelingen partijen
+    - het geschil
+    - tenlastelegging
+    - de tenlastelegging
+    - de vordering
+    - het verweer
+    - het verzoek
+    - geschil
+    - geding in cassatie
+    - eis officier van justitie
+    - de vordering en het verweer
+    - de inhoud van de tenlastelegging
+    - het wrakingsverzoek
+    - geschil in hoger beroep
+    - het verzoek en het verweer
+    - geschil en conclusies van partijen
+    - het cassatieberoep
+    - het geschil in conventie
+    - de standpunten
+    - standpunten van partijen
+    - het standpunt van de officier van justitie
+    - de vordering tot tenuitvoerlegging

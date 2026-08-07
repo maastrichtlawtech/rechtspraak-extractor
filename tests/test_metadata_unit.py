@@ -7,7 +7,6 @@ All tests are isolated — no real network calls, no real filesystem writes
 from __future__ import annotations
 
 import urllib.error
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd

@@ -2,17 +2,45 @@
 Unit tests for the section text extractor.
 """
 import logging
-import pytest
 
+import pytest
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
 from rechtspraak_extractor.extract_text_sections import SectionExtractor
 
+# Define test input variables and XML data
+_KNOWN_SECTION_TITLES = {"this is a known title", "also a known title", "context"}
+
 _test_xml_no_uitspraak_node = b"<root />"
 
 _test_xml_no_data = b"""\
     <uitspraak id="test:id:0"> Test data.
+    </uitspraak>
+"""
+
+_test_xml_section_no_title_no_role = b"""\
+    <uitspraak id="test:id:1">
+        <section>
+            <para>Test</para>
+        </section>
+    </uitspraak>
+"""
+
+_test_xml_section_role_no_title = b"""\
+    <uitspraak id="test:id:2">
+        <section role="Role">
+            <para>Test</para>
+        </section>
+    </uitspraak>
+"""
+
+_test_xml_section_role_and_title = b"""\
+    <uitspraak id="test:id:3">
+        <section role="Role">
+            <title>Title</title>
+            <para>Test</para>
+        </section>
     </uitspraak>
 """
 
@@ -28,20 +56,25 @@ _test_xml_standard_format = b"""\
             </parablock>
         </uitspraak.info>
         <section role="procesverloop">
-            <title>Procesverloop </title>
             <para />
             <parablock>
-            <para>Course of proceedings</para>
+            <para>Course of proceedings part I.</para>
             </parablock>
             <para />
         </section>
         <section>
             <title>Beslissing </title>
             <para />
-            <para>1. Decision I
+            <para>1. Decision I. </para>
             <para />
-            <para>2. Decision II
-            <para />
+        </section>
+        <section>
+            <title>Procesverloop </title>
+            <para>Course of proceedings part II.</para>
+        </section>
+        <section>
+            <title>Beslissing </title>
+            <para>2. Decision II.</para>
         </section>
     </uitspraak>
 """
@@ -52,11 +85,15 @@ _test_xml_no_section_titles = b"""\
     <parablock>
       <para>1.	De procedure</para>
       <para> The proceedings.</para>
+      <para> 1.1 Context </para>
+      <para>Context text.</para>
+      <para>1. De procedure </para>
+      <para>Proceedings continued.</para>
     </parablock>
     <para />
     <parablock>
       <para>2.	Beslissing</para>
-      <para>2.1	The decision is:</para>
+      <para>2.1	The decision is</para>
     </parablock>
 </uitspraak>
 """
@@ -89,7 +126,7 @@ def section_extractor() -> SectionExtractor:
     """
     dummy_xml = b"""<test id="dummy:id:1"><para>Dummy text</para></test>"""
     dummy_soup = BeautifulSoup(dummy_xml, features="xml")
-    return SectionExtractor(dummy_soup)
+    return SectionExtractor(dummy_soup, _KNOWN_SECTION_TITLES)
 
 @pytest.mark.unit
 def test_normalize_xml_text_collapses_whitespace():
@@ -103,64 +140,35 @@ def test_normalize_xml_text_collapses_whitespace():
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("xml", "expected_keys", "expected_values"),
+    "xml, expected_title",
     [
-        (_test_xml_no_data, set(), []),
-        (
-            _test_xml_standard_format,
-            {"uitspraak.info", "Procesverloop", "Beslissing"},
-            [
-                ("uitspraak.info", "uitspraak College van Beroep zaaknummer: 14/803"),
-                ("Procesverloop", "Course of proceedings"),
-                ("Beslissing", "1. Decision I 2. Decision II")
-            ],
-        ),
+        (_test_xml_section_no_title_no_role, "no_section_title_found"),
+        (_test_xml_section_role_no_title, "Role"),
+        (_test_xml_section_role_and_title, "Title"),
     ],
 )
-def test_extract_text_sections_standard_format(section_extractor, xml, expected_keys, expected_values):
+def test_get_section_title(section_extractor, xml, expected_title):
     """
-    Test the _extract_text_sections_standard_format method with different XML inputs.
+    Test the _get_section_title method to ensure it correctly extracts and normalizes section titles from <section> tags.
     """
-    uitspraak_children = return_uitspraak_node_children(xml)
-    sections = section_extractor._extract_text_sections_standard_format(uitspraak_children)
-
-    assert set(sections.keys()) == expected_keys
-    for section_name, expected_text in expected_values:
-        assert expected_text == sections[section_name]
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("1. Section title", True),
-        ("2) Section title", True),
-        ("I. SECTION TITLE", True),
-        ("II Section title", True),
-        ("Title:", True),
-        ("2.3 Subsection not a title", False),
-        ("A very long sentence that should not be treated as a title because it has too many words", False),
-        ("Look like a title", False),
-        ("", False),
-        ("   ", False),
-    ],
-)
-def test_is_title_candidate(section_extractor, text, expected):
-    """
-    Test the _is_title_candidate method with various text inputs to determine if they are considered title candidates.
-    """
-    assert section_extractor._is_title_candidate(text) is expected
+    soup = BeautifulSoup(xml, features="xml")
+    section_tag = soup.find("section")
+    title = section_extractor._get_section_title(section_tag)
+    assert title == expected_title
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "raw_title_text, expected_clean_title_text",
     [
-        ("1) Title", "Title"),
-        ("I   Title", "Title"),
-        ("II. Title:", "Title"),
-        ("Title:", "Title"),
-        ("  2.   Title  ", "Title"),
+        ("1) Title", "title"),
+        ("I   Title", "title"),
+        ("II. Title:", "title"),
+        ("Title:", "title"),
+        ("  2.   Title.  ", "title"),
+        ("2.3 Title", "title"),
+        ("2.3.4 Title", "title"),
+        ("1. Title text with number 2", "title text with number 2"),
     ],
 )
 def test_clean_title(section_extractor, raw_title_text, expected_clean_title_text):
@@ -192,75 +200,131 @@ def test_add_line(section_extractor, current_title, text, initial_sections, expe
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "xml, current_title, initial_sections, expected_title, expected_sections",
+    ("xml", "expected_keys", "expected_values"),
     [
+        (_test_xml_no_data, set(), []), # Test case with no data, expecting empty sections
         (
-            b"""\
-            <uitspraak>
-                <parablock>
-                    <para>1. Section title</para>
-                    <para> Case text. </para>
-                </parablock>
-            </uitspraak>
-            """,
-            None,
-            {},
-            "Section title",
-            {
-                "Section title": ["Case text."],
-            },
-        ),
-        (
-            b"""\
-            <uitspraak>
-                <parablock>
-                    <para>Random text not a title</para>
-                    <para>2 New title</para>
-                    <para>Case text</para>
-                </parablock>
-            </uitspraak>
-            """,
-            "Current title",
-            {"Current title": []},
-            "New title",
-            {
-                "Current title": ["Random text not a title"],
-                "New title": ["Case text"],
-            },
-        ),
-        (
-            b"""\
-            <uitspraak>
-                <parablock>
-                    <para />
-                    <para>   </para>
-                </parablock>
-            </uitspraak>
-            """,
-            "Current title",
-            {"Current title": ["Existing text"]},
-            "Current title",
-            {"Current title": ["Existing text"]},
+            _test_xml_standard_format, # Test case with standard format XML, expecting specific section keys and values
+            {"uitspraak.info", "procesverloop", "beslissing"},
+            [
+                ("uitspraak.info", "uitspraak College van Beroep zaaknummer: 14/803"),
+                ("procesverloop", "Course of proceedings part I. Course of proceedings part II."),
+                ("beslissing", "1. Decision I. 2. Decision II.")
+            ],
         ),
     ],
 )
-def test_read_parablock_tag(
-    section_extractor, 
-    xml, 
-    current_title, 
-    initial_sections, 
-    expected_title, 
-    expected_sections
+def test_extract_text_sections_standard_format(section_extractor, xml, expected_keys, expected_values):
+    """
+    Test the _extract_text_sections_standard_format method with different XML inputs.
+    """
+    uitspraak_children = return_uitspraak_node_children(xml)
+    sections = section_extractor._extract_text_sections_standard_format(uitspraak_children)
+
+    assert set(sections.keys()) == expected_keys
+    for section_name, expected_text in expected_values:
+        assert expected_text == sections[section_name]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text, expected_result",
+    [
+        ("This is a known title", True), # Test case with a known title that is passed to SectionExtractor, expecting a match
+        ("This is, a known title.", True),
+        ("this is a known title 1", True),
+        ("$this is a known title$", True), # Test case with a known title that has special characters, expecting a match
+        ("Also a known title", True),
+        ("Random Title", False),
+        ("", False),
+        ("   ", False),
+    ],
+)
+def test_match_title_candidate(section_extractor, text, expected_result):
+    """
+    Test the _match_title_candidate method with various texts to determine if they match known section titles.
+    """
+    assert section_extractor._match_title_candidate(text) is expected_result
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("1. Section title", True),
+        ("2) Section title", True),
+        ("I. SECTION TITLE", True),
+        ("II Section title", True),
+        ("Title:", True),
+        ("2.3 This is a known title", True), # Known titles are matched with any numeric prefix
+        ("2.3 Subsection not a title", False), # Subsections are not title candidates unless they match known titles
+        ("A very long sentence that should not be treated as a title because it has too many words", False),
+        ("Look like a title", False),
+        ("", False),
+        ("   ", False),
+    ],
+)
+def test_is_title_candidate(section_extractor, text, expected):
+    """
+    Test the _is_title_candidate method with various text inputs to determine if they are considered title candidates.
+    """
+    assert section_extractor._is_title_candidate(text) is expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "para_xml, current_title, initial_sections, expected_title, expected_sections",
+    [
+        # Title candidate (numeric prefix) -> updates current_title, initializes section
+        (
+            "<para>1. Title</para>",
+            None,
+            {},
+            "title",
+            {"title": []},
+        ),
+        # Body text -> appended to active section, title unchanged
+        (
+            "<para>  Body text, not a title. </para>",
+            "title",
+            {"title": []},
+            "title",
+            {"title": ["Body text, not a title."]},
+        ),
+        # Empty para -> no changes
+        (
+            "<para>   </para>",
+            "title",
+            {"title": ["Existing line."]},
+            "title",
+            {"title": ["Existing line."]},
+        ),
+        # Body text with no active title -> ignored
+        (
+            "<para>Body without section</para>",
+            None,
+            {},
+            None,
+            {},
+        ),
+    ],
+)
+def test_read_para_tag(
+    section_extractor,
+    para_xml,
+    current_title,
+    initial_sections,
+    expected_title,
+    expected_sections,
 ):
     """
-    Test the _read_parablock_tag method to ensure it correctly reads a <parablock> tag and updates the sections and current title as expected.
+    Test that _read_para_tag updates current_title and section_titles_text_lines correctly.
     """
-    soup = BeautifulSoup(xml, features="xml")
-    parablock_tag = soup.find("parablock")
-    sections = {key: value[:] for key, value in initial_sections.items()}
+    soup = BeautifulSoup(f"<root>{para_xml}</root>", features="xml")
+    para_tag = soup.find("para")
+    sections = {k: v[:] for k, v in initial_sections.items()}
 
-    returned_title = section_extractor._read_parablock_tag(
-        parablock_tag,
+    returned_title = section_extractor._read_para_tag(
+        para_tag,
         sections,
         current_title,
     )
@@ -276,10 +340,11 @@ def test_read_parablock_tag(
         (_test_xml_no_data, set(), []),
         (
             _test_xml_no_section_titles,
-            {"De procedure", "Beslissing"},
+            {"de procedure", "context", "beslissing"},
             [
-                ("De procedure", "The proceedings."),
-                ("Beslissing", "2.1 The decision is:")
+                ("de procedure", "The proceedings. Proceedings continued."),
+                ("context", "Context text."),
+                ("beslissing", "2.1 The decision is")
             ],
         ),
     ],
@@ -327,12 +392,13 @@ def test_extract_text_sections(section_extractor, xml, expected_extraction_mode,
     # Expected text extracted from standard format or rule-based extraction
     expected_text_standard_format = {
         "uitspraak.info": "uitspraak College van Beroep zaaknummer: 14/803",
-        "Procesverloop": "Course of proceedings",
-        "Beslissing": "1. Decision I 2. Decision II",
+        "procesverloop": "Course of proceedings part I. Course of proceedings part II.",
+        "beslissing": "1. Decision I. 2. Decision II.",
     }
     expected_text_rule_based = {
-        "De procedure": "The proceedings.",
-        "Beslissing": "2.1 The decision is:",
+        "de procedure": "The proceedings. Proceedings continued.",
+        "context": "Context text.",
+        "beslissing": "2.1 The decision is",
     }
 
     # Provide the raw XML file in a parsed form to the SectionExtractor instance

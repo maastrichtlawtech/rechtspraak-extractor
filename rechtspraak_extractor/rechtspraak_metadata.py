@@ -9,6 +9,7 @@ import logging
 import os
 import urllib.request
 import urllib.error
+import yaml
 from typing import Optional, Union
 from dataclasses import dataclass
 from enum import Enum
@@ -88,6 +89,18 @@ METADATA_FIELD_MAPPING = {
 MULTIPLE_VALUE_FIELDS = {
     "subject",
     "zaaknummer",
+}
+
+# Get the known section titles, which is a user input from the config file
+# It is passed to the SectionExtractor class when extracting case text by sections
+config_path = Path(__file__).resolve().parent.parent / "config.yml"
+config_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+section_title_known_groups = config_data["section_title_known_groups"]
+# Flatten all section titles into a single set
+KNOWN_SECTION_TITLES = {
+    title
+    for titles in section_title_known_groups.values()
+    for title in titles
 }
 
 # Global lock for thread-safe file operations
@@ -293,7 +306,7 @@ def process_metadata_fields(soup: BeautifulSoup, ecli_id: str, extract_text_by_s
             elif field == "full_text" and extract_text_by_sections == ExtractTextbySectionsOption.YES.value:
                 # Extract text split by sections using SectionExtractor
                 logging.info(f"Extracting full text by sections for ECLI {ecli_id}")
-                section_extractor = SectionExtractor(soup)
+                section_extractor = SectionExtractor(soup, KNOWN_SECTION_TITLES)
                 value = section_extractor.extract_text_sections()
             else:
                 value = get_text_if_exists(element, ecli_id)
