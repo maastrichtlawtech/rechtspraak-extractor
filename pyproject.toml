@@ -32,7 +32,8 @@ dependencies = [
     "urllib3",
     "xmltodict",
     "fake-headers",
-    "lxml"
+    "lxml",
+    "PyYAML"
 ]
 
 [project.urls]
@@ -42,6 +43,9 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["rechtspraak_extractor"]
 namespaces = false
+
+[tool.setuptools.package-data]
+rechtspraak_extractor = ["config.yml"]
 
 [tool.setuptools_scm]
 write_to = "rechtspraak_extractor/_version.py"
