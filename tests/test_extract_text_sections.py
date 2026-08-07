@@ -1,6 +1,7 @@
 """
 Unit tests for the section text extractor.
 """
+
 import logging
 
 import pytest
@@ -79,6 +80,22 @@ _test_xml_standard_format = b"""\
     </uitspraak>
 """
 
+_test_xml_nested_sections = b"""\
+    <uitspraak id="test:id:nested">
+        <section>
+            <title>Parent</title>
+            <para>Parent body.</para>
+            <section>
+                <title>Child</title>
+                <para>Child body.</para>
+                <section role="grandchild">
+                    <para>Grandchild body.</para>
+                </section>
+            </section>
+        </section>
+    </uitspraak>
+"""
+
 _test_xml_no_section_titles = b"""\
     <uitspraak id="test:id:2">
         <para>College van Beroep voor</para>
@@ -105,10 +122,10 @@ def return_uitspraak_node_children(xml: bytes) -> list[Tag]:
 
     Args:
         xml (bytes): The XML data as bytes.
-    
+
     Returns:
         A list of Tag objects representing the children of the <uitspraak> node.
-    
+
     Raises:
         ValueError: If no <uitspraak> node is found in the XML.
     """
@@ -119,6 +136,7 @@ def return_uitspraak_node_children(xml: bytes) -> list[Tag]:
 
     return [child for child in uitspraak_node.children if isinstance(child, Tag)]
 
+
 @pytest.fixture
 def section_extractor() -> SectionExtractor:
     """
@@ -127,6 +145,7 @@ def section_extractor() -> SectionExtractor:
     dummy_xml = b"""<test id="dummy:id:1"><para>Dummy text</para></test>"""
     dummy_soup = BeautifulSoup(dummy_xml, features="xml")
     return SectionExtractor(dummy_soup, _KNOWN_SECTION_TITLES)
+
 
 @pytest.mark.unit
 def test_normalize_xml_text_collapses_whitespace():
@@ -175,7 +194,9 @@ def test_clean_title(section_extractor, raw_title_text, expected_clean_title_tex
     """
     Test the _clean_title_text method to ensure it correctly cleans and normalizes title text.
     """
-    assert section_extractor._clean_title_text(raw_title_text) == expected_clean_title_text
+    assert (
+        section_extractor._clean_title_text(raw_title_text) == expected_clean_title_text
+    )
 
 
 @pytest.mark.unit
@@ -185,10 +206,17 @@ def test_clean_title(section_extractor, raw_title_text, expected_clean_title_tex
         (None, "Case text", {}, {}),
         (None, "   ", {}, {}),
         ("Section title", "   ", {"Section title": []}, {"Section title": []}),
-        ("Section title", "Case text", {"Section title": []}, {"Section title": ["Case text"]}),
+        (
+            "Section title",
+            "Case text",
+            {"Section title": []},
+            {"Section title": ["Case text"]},
+        ),
     ],
 )
-def test_add_line(section_extractor, current_title, text, initial_sections, expected_sections):
+def test_add_line(
+    section_extractor, current_title, text, initial_sections, expected_sections
+):
     """
     Test the _add_line method to ensure it correctly adds lines of text to the appropriate section.
     """
@@ -202,24 +230,35 @@ def test_add_line(section_extractor, current_title, text, initial_sections, expe
 @pytest.mark.parametrize(
     ("xml", "expected_keys", "expected_values"),
     [
-        (_test_xml_no_data, set(), []), # Test case with no data, expecting empty sections
         (
-            _test_xml_standard_format, # Test case with standard format XML, expecting specific section keys and values
+            _test_xml_no_data,
+            set(),
+            [],
+        ),  # Test case with no data, expecting empty sections
+        (
+            _test_xml_standard_format,  # Test case with standard format XML, expecting specific section keys and values
             {"uitspraak.info", "procesverloop", "beslissing"},
             [
                 ("uitspraak.info", "uitspraak College van Beroep zaaknummer: 14/803"),
-                ("procesverloop", "Course of proceedings part I. Course of proceedings part II."),
-                ("beslissing", "1. Decision I. 2. Decision II.")
+                (
+                    "procesverloop",
+                    "Course of proceedings part I. Course of proceedings part II.",
+                ),
+                ("beslissing", "1. Decision I. 2. Decision II."),
             ],
         ),
     ],
 )
-def test_extract_text_sections_standard_format(section_extractor, xml, expected_keys, expected_values):
+def test_extract_text_sections_standard_format(
+    section_extractor, xml, expected_keys, expected_values
+):
     """
     Test the _extract_text_sections_standard_format method with different XML inputs.
     """
     uitspraak_children = return_uitspraak_node_children(xml)
-    sections = section_extractor._extract_text_sections_standard_format(uitspraak_children)
+    sections = section_extractor._extract_text_sections_standard_format(
+        uitspraak_children
+    )
 
     assert set(sections.keys()) == expected_keys
     for section_name, expected_text in expected_values:
@@ -227,13 +266,36 @@ def test_extract_text_sections_standard_format(section_extractor, xml, expected_
 
 
 @pytest.mark.unit
+def test_extract_text_sections_standard_format_recurses_without_duplicating_children(
+    section_extractor,
+):
+    uitspraak_children = return_uitspraak_node_children(_test_xml_nested_sections)
+
+    sections = section_extractor._extract_text_sections_standard_format(
+        uitspraak_children
+    )
+
+    assert sections == {
+        "parent": "Parent body.",
+        "child": "Child body.",
+        "grandchild": "Grandchild body.",
+    }
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "text, expected_result",
     [
-        ("This is a known title", True), # Test case with a known title that is passed to SectionExtractor, expecting a match
+        (
+            "This is a known title",
+            True,
+        ),  # Test case with a known title that is passed to SectionExtractor, expecting a match
         ("This is, a known title.", True),
         ("this is a known title 1", True),
-        ("$this is a known title$", True), # Test case with a known title that has special characters, expecting a match
+        (
+            "$this is a known title$",
+            True,
+        ),  # Test case with a known title that has special characters, expecting a match
         ("Also a known title", True),
         ("Random Title", False),
         ("", False),
@@ -246,6 +308,7 @@ def test_match_title_candidate(section_extractor, text, expected_result):
     """
     assert section_extractor._match_title_candidate(text) is expected_result
 
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "text, expected",
@@ -255,9 +318,21 @@ def test_match_title_candidate(section_extractor, text, expected_result):
         ("I. SECTION TITLE", True),
         ("II Section title", True),
         ("Title:", True),
-        ("2.3 This is a known title", True), # Known titles are matched with any numeric prefix
-        ("2.3 Subsection not a title", False), # Subsections are not title candidates unless they match known titles
-        ("A very long sentence that should not be treated as a title because it has too many words", False),
+        ("10. Unknown heading", True),
+        (
+            "2.3 This is a known title",
+            True,
+        ),  # Known titles are matched with any numeric prefix
+        (
+            "2.3 Subsection not a title",
+            False,
+        ),  # Subsections are not title candidates unless they match known titles
+        ("9. Het beroep is ongegrond.", False),
+        ("1. Belanghebbende is geboren in het jaar 1940.", False),
+        (
+            "A very long sentence that should not be treated as a title because it has too many words",
+            False,
+        ),
         ("Look like a title", False),
         ("", False),
         ("   ", False),
@@ -344,12 +419,14 @@ def test_read_para_tag(
             [
                 ("de procedure", "The proceedings. Proceedings continued."),
                 ("context", "Context text."),
-                ("beslissing", "2.1 The decision is")
+                ("beslissing", "2.1 The decision is"),
             ],
         ),
     ],
 )
-def test_extract_text_sections_rule_based(section_extractor, xml, expected_keys, expected_values):
+def test_extract_text_sections_rule_based(
+    section_extractor, xml, expected_keys, expected_values
+):
     """
     Test the _extract_text_sections_rule_based method with different XML inputs.
     """
@@ -361,6 +438,28 @@ def test_extract_text_sections_rule_based(section_extractor, xml, expected_keys,
         assert expected_text == sections[section_name]
 
 
+@pytest.mark.unit
+def test_rule_based_extraction_preserves_short_numbered_sentences(section_extractor):
+    xml = b"""\
+        <uitspraak>
+            <parablock>
+                <para>gronden:</para>
+                <para>9. Het beroep is ongegrond.</para>
+                <para>proceskosten:</para>
+                <para>Voor een proceskostenveroordeling bestaat geen aanleiding.</para>
+            </parablock>
+        </uitspraak>
+    """
+    uitspraak_children = return_uitspraak_node_children(xml)
+
+    sections = section_extractor._extract_text_sections_rule_based(uitspraak_children)
+
+    assert sections == {
+        "gronden": "9. Het beroep is ongegrond.",
+        "proceskosten": "Voor een proceskostenveroordeling bestaat geen aanleiding.",
+    }
+
+
 def test_has_meaningful_sections(section_extractor):
     """
     Test the _has_meaningful_sections method to ensure it correctly identifies whether the extracted sections contain meaningful content.
@@ -369,10 +468,14 @@ def test_has_meaningful_sections(section_extractor):
     assert not section_extractor._has_meaningful_sections({})
 
     # Case 2: Only <uitspraak.info> section
-    assert not section_extractor._has_meaningful_sections({"uitspraak.info": "Some info"})
+    assert not section_extractor._has_meaningful_sections(
+        {"uitspraak.info": "Some info"}
+    )
 
     # Case 3: Meaningful sections present
-    assert section_extractor._has_meaningful_sections({"Section 1": "Some text", "Section 2": "More text"})
+    assert section_extractor._has_meaningful_sections(
+        {"Section 1": "Some text", "Section 2": "More text"}
+    )
 
 
 @pytest.mark.unit
@@ -385,7 +488,9 @@ def test_has_meaningful_sections(section_extractor):
         (_test_xml_no_data, "Full_Text"),
     ],
 )
-def test_extract_text_sections(section_extractor, xml, expected_extraction_mode, caplog):
+def test_extract_text_sections(
+    section_extractor, xml, expected_extraction_mode, caplog
+):
     """
     Test the extract_text_sections method with different XML inputs and expected extraction modes.
     """
@@ -408,15 +513,27 @@ def test_extract_text_sections(section_extractor, xml, expected_extraction_mode,
         text_extracted = section_extractor.extract_text_sections()
     # Test if the correct extraction method was used based on the expected extraction mode
     if expected_extraction_mode == "None":
-        assert text_extracted == {'full_text': ""}
-        assert "No <uitspraak> node found in the XML document. Returning empty text." in caplog.text 
+        assert text_extracted == {"full_text": ""}
+        assert (
+            "No <uitspraak> node found in the XML document. Returning empty text."
+            in caplog.text
+        )
         return
     elif expected_extraction_mode == "Sections_Standard_Format":
         assert text_extracted == expected_text_standard_format
-        assert "Sections extracted from full text using the standard XML structure method." in caplog.text
+        assert (
+            "Sections extracted from full text using the standard XML structure method."
+            in caplog.text
+        )
     elif expected_extraction_mode == "Sections_Rule_Based":
         assert text_extracted == expected_text_rule_based
-        assert "Sections extracted from full text using the rule-based extraction method." in caplog.text
+        assert (
+            "Sections extracted from full text using the rule-based extraction method."
+            in caplog.text
+        )
     else:  # expected_extraction_mode == "Full_Text"
         assert text_extracted == {"full_text": "Test data."}
-        assert "Sections not found. Returning full text as a single section." in caplog.text
+        assert (
+            "Sections not found. Returning full text as a single section."
+            in caplog.text
+        )
