@@ -4,10 +4,10 @@ Unit tests for rechtspraak_metadata.py.
 All tests are isolated — no real network calls, no real filesystem writes
 (except tests that use tmp_path for file-write verification).
 """
+
 from __future__ import annotations
 
 import urllib.error
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from rechtspraak_extractor.rechtspraak_metadata import (
     METADATA_COLUMNS,
+    ExtractTextbySectionsOption,
     extract_data_from_xml,
     fetch_eclis_via_sqlite,
     get_data_from_api,
@@ -86,9 +87,23 @@ def test_process_metadata_fields_extracts_known_fields(sample_ecli_xml):
 @pytest.mark.unit
 def test_process_metadata_fields_extracts_full_text(sample_ecli_xml):
     soup = BeautifulSoup(sample_ecli_xml, features="xml")
-    metadata, has_metadata = process_metadata_fields(soup, "ECLI:NL:HR:2020:1")
 
-    assert "Full decision text" in metadata.get("full_text", "")
+    # Test that full text is extracted correctly when extract_text_by_sections is 'no'
+    metadata, has_metadata = process_metadata_fields(
+        soup,
+        "ECLI:NL:HR:2020:1",
+        extract_text_by_sections=ExtractTextbySectionsOption.NO.value,
+    )
+    assert metadata.get("full_text", "") == "Full decision text here."
+
+    # Test that full text is extracted correctly when extract_text_by_sections is 'yes'
+    # As there are no sections in the sample XML, it should return a dictionary with a single key 'full_text'
+    metadata, has_metadata = process_metadata_fields(
+        soup,
+        "ECLI:NL:HR:2020:1",
+        extract_text_by_sections=ExtractTextbySectionsOption.YES.value,
+    )
+    assert metadata.get("full_text", "") == {"full_text": "Full decision text here."}
 
 
 @pytest.mark.unit

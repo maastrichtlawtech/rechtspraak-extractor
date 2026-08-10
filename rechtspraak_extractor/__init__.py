@@ -1,6 +1,7 @@
 from rechtspraak_extractor import rechtspraak
 from rechtspraak_extractor import rechtspraak_metadata
 from rechtspraak_extractor import rechtspraak_functions
+from rechtspraak_extractor.extract_text_sections import SectionExtractor
 from rechtspraak_extractor.rechtspraak import get_rechtspraak
 from rechtspraak_extractor.rechtspraak_metadata import get_rechtspraak_metadata
 import logging
@@ -13,4 +14,5 @@ __all__ = [
     "rechtspraak",
     "rechtspraak_metadata",
     "rechtspraak_functions",
+    "SectionExtractor",
 ]
