@@ -109,6 +109,17 @@ _test_xml_standard_format = b"""\
     </uitspraak>
 """
 
+_test_xml_short_numbered_sentences = b"""\
+        <uitspraak>
+            <parablock>
+                <para>gronden:</para>
+                <para>9. Het beroep is ongegrond.</para>
+                <para>proceskosten:</para>
+                <para>Voor een proceskostenveroordeling bestaat geen aanleiding.</para>
+            </parablock>
+        </uitspraak>
+    """
+
 _test_xml_no_section_titles = b"""\
     <uitspraak id="test:id:2">
         <para>College van Beroep voor</para>
@@ -266,7 +277,7 @@ def test_extract_standard_section(
     expected_sections,
 ):
     """
-    Test the _extract_text_sections_standard_format method to ensure it correctly extracts sections in standard format.
+    Test the _extract_standard_section method to ensure it correctly extracts sections in standard format.
     It should handle both unnested and nested sections.
     """
     # Start with an empty section_titles_text dictionary.
@@ -285,13 +296,11 @@ def test_extract_standard_section(
 @pytest.mark.parametrize(
     ("xml", "expected_keys", "expected_values"),
     [
+        # Test case with no data, expecting empty sections
+        (_test_xml_no_data, set(), []),  
+        # Test case with standard format XML, expecting specific section keys and values
         (
-            _test_xml_no_data,
-            set(),
-            [],
-        ),  # Test case with no data, expecting empty sections
-        (
-            _test_xml_standard_format,  # Test case with standard format XML, expecting specific section keys and values
+            _test_xml_standard_format,  
             {"uitspraak.info", "procesverloop", "beslissing"},
             [
                 ("uitspraak.info", "uitspraak College van Beroep zaaknummer: 14/803"),
@@ -308,7 +317,7 @@ def test_extract_full_text_sections_standard_format(
     section_extractor, xml, expected_keys, expected_values
 ):
     """
-    Test the _extract_text_sections_standard_format method with different XML inputs.
+    Test the _extract_full_text_sections_standard_format method with different XML inputs.
     """
     uitspraak_children = return_uitspraak_node_children(xml)
     
@@ -325,16 +334,12 @@ def test_extract_full_text_sections_standard_format(
 @pytest.mark.parametrize(
     "text, expected_result",
     [
-        (
-            "This is a known title",
-            True,
-        ),  # Test case with a known title that is passed to SectionExtractor, expecting a match
+        # Test case with a known title that is passed to SectionExtractor, expecting a match
+        ("This is a known title", True),
         ("This is, a known title.", True),
         ("this is a known title 1", True),
-        (
-            "$this is a known title$",
-            True,
-        ),  # Test case with a known title that has special characters, expecting a match
+        # Test case with a known title that has special characters, expecting a match
+        ("$this is a known title$", True),
         ("Also a known title", True),
         ("Random Title", False),
         ("", False),
@@ -354,20 +359,16 @@ def test_match_title_candidate(section_extractor, text, expected_result):
     [
         ("1. Section title", True),
         ("2) Section title", True),
+        ("10. Unknown heading", True),
         ("I. SECTION TITLE", True),
         ("II Section title", True),
         ("Title:", True),
-        ("10. Unknown heading", True),
-        (
-            "2.3 This is a known title",
-            True,
-        ),  # Known titles are matched with any numeric prefix
-        (
-            "2.3 Subsection not a title",
-            False,
-        ),  # Subsections are not title candidates unless they match known titles
-        ("9. Het beroep is ongegrond.", False),
-        ("1. Belanghebbende is geboren in het jaar 1940.", False),
+        # Known titles are matched with any numeric prefix
+        ("2.3 This is a known title", True),
+        # Subsections are not title candidates unless they match known titles 
+        ("2.3 Subsection not a title", False),  
+        # Ends with a period and not a known title
+        ("9. Het beroep is ongegrond.", False),  
         (
             "A very long sentence that should not be treated as a title because it has too many words",
             False,
@@ -451,7 +452,18 @@ def test_read_para_tag(
 @pytest.mark.parametrize(
     ("xml", "expected_keys", "expected_values"),
     [
+        # Test case with no data, expecting empty sections
         (_test_xml_no_data, set(), []),
+        # Short sentences that look like titles but are not, should be treated as body text under the correct section
+        (
+            _test_xml_short_numbered_sentences,
+            {"gronden", "proceskosten"},
+            [
+                ("gronden", "9. Het beroep is ongegrond."),
+                ("proceskosten", "Voor een proceskostenveroordeling bestaat geen aanleiding."),
+            ],
+        ),
+        # Test case with no section titles, but can be extracted using rule-based extraction
         (
             _test_xml_no_section_titles,
             {"de procedure", "context", "beslissing"},
@@ -463,40 +475,18 @@ def test_read_para_tag(
         ),
     ],
 )
-def test_extract_text_sections_rule_based(
+def test_extract_full_text_sections_rule_based(
     section_extractor, xml, expected_keys, expected_values
 ):
     """
-    Test the _extract_text_sections_rule_based method with different XML inputs.
+    Test the _extract_full_text_sections_rule_based method with different XML inputs.
     """
     uitspraak_children = return_uitspraak_node_children(xml)
-    sections = section_extractor._extract_text_sections_rule_based(uitspraak_children)
+    sections = section_extractor._extract_full_text_sections_rule_based(uitspraak_children)
 
     assert set(sections.keys()) == expected_keys
     for section_name, expected_text in expected_values:
         assert expected_text == sections[section_name]
-
-
-@pytest.mark.unit
-def test_rule_based_extraction_preserves_short_numbered_sentences(section_extractor):
-    xml = b"""\
-        <uitspraak>
-            <parablock>
-                <para>gronden:</para>
-                <para>9. Het beroep is ongegrond.</para>
-                <para>proceskosten:</para>
-                <para>Voor een proceskostenveroordeling bestaat geen aanleiding.</para>
-            </parablock>
-        </uitspraak>
-    """
-    uitspraak_children = return_uitspraak_node_children(xml)
-
-    sections = section_extractor._extract_text_sections_rule_based(uitspraak_children)
-
-    assert sections == {
-        "gronden": "9. Het beroep is ongegrond.",
-        "proceskosten": "Voor een proceskostenveroordeling bestaat geen aanleiding.",
-    }
 
 
 def test_has_meaningful_sections(section_extractor):

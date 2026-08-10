@@ -321,7 +321,7 @@ class SectionExtractor:
 
         return current_title
 
-    def _extract_text_sections_rule_based(
+    def _extract_full_text_sections_rule_based(
         self, uitspraak_node_children: list[Tag]
     ) -> dict[str, str]:
         """
@@ -423,7 +423,7 @@ class SectionExtractor:
             )
         # If there is no section tag, use the rule-based extraction method
         elif any(child.name in ["parablock", "para"] for child in children):
-            text_split_by_sections = self._extract_text_sections_rule_based(children)
+            text_split_by_sections = self._extract_full_text_sections_rule_based(children)
             logger.info(
                 "Sections extracted from full text using the rule-based extraction method."
             )
