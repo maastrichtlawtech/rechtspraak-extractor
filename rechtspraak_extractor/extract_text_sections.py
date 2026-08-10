@@ -129,7 +129,55 @@ class SectionExtractor:
         if cleaned_text:
             section_titles_text_lines[current_title].append(cleaned_text)
 
-    def _extract_text_sections_standard_format(
+    def _extract_standard_section(
+        self,
+        section_tag: Tag,
+        section_titles_text_lines: dict[str, list[str]],
+    ) -> None:
+        """
+        Extract one standard section and recursively extract its child sections.
+            - Read text from the current <section> tag, excluding any nested <section> tags and the <title> tag.
+            - Handles nested sections by recursively calling itself for each child <section> tag.
+            - Updates the section_titles_text_lines dictionary with the extracted text lines under their respective section titles.
+
+        Args:
+            section_tag: The <section> tag to extract.
+            section_titles_text_lines: Dictionary of section titles to list of text lines.
+        """
+        # Get the title of the current section and initialize its entry in the dictionary
+        current_title = self._clean_title_text(self._get_section_title(section_tag))
+        section_titles_text_lines.setdefault(current_title, [])
+        # Get the section text
+        section_text = BeautifulSoup(str(section_tag), features="xml").find(
+            "section"
+        )
+
+        if section_text is not None:
+            # Remove the <title> tag from the section text to avoid duplication in the body text
+            copied_title = section_text.find("title", recursive=False)
+            if copied_title is not None:
+                copied_title.decompose()
+
+            # Child sections are extracted separately and must not be duplicated in
+            # the parent section's body.
+            for nested_section in section_text.find_all(
+                "section", recursive=False
+            ):
+                nested_section.decompose()
+
+            body_text = self._normalize_xml_text(
+                section_text.get_text(" ", strip=True)
+            )
+            self._add_line(section_titles_text_lines, current_title, body_text)
+
+        # Recursively extract text from any nested <section> tags within the current section
+        for nested_section in section_tag.find_all("section", recursive=False):
+            self._extract_standard_section(
+                nested_section,
+                section_titles_text_lines,
+            )
+
+    def _extract_full_text_sections_standard_format(
         self, uitspraak_node_children: list[Tag]
     ) -> dict[str, str]:
         """
@@ -169,41 +217,6 @@ class SectionExtractor:
             for title, lines in section_titles_text_lines.items()
             if lines
         }
-
-    def _extract_standard_section(
-        self,
-        section_tag: Tag,
-        section_titles_text_lines: dict[str, list[str]],
-    ) -> None:
-        """Extract one standard section and recursively extract its child sections."""
-        current_title = self._clean_title_text(self._get_section_title(section_tag))
-        section_titles_text_lines.setdefault(current_title, [])
-
-        section_text_copy = BeautifulSoup(str(section_tag), features="xml").find(
-            "section"
-        )
-        if section_text_copy is not None:
-            copied_title = section_text_copy.find("title", recursive=False)
-            if copied_title is not None:
-                copied_title.decompose()
-
-            # Child sections are extracted separately and must not be duplicated in
-            # the parent section's body.
-            for nested_section in section_text_copy.find_all(
-                "section", recursive=False
-            ):
-                nested_section.decompose()
-
-            body_text = self._normalize_xml_text(
-                section_text_copy.get_text(" ", strip=True)
-            )
-            self._add_line(section_titles_text_lines, current_title, body_text)
-
-        for nested_section in section_tag.find_all("section", recursive=False):
-            self._extract_standard_section(
-                nested_section,
-                section_titles_text_lines,
-            )
 
     def _match_title_candidate(self, text: str) -> bool:
         """
@@ -269,9 +282,7 @@ class SectionExtractor:
             return False
         if numeric_title_pattern.match(normalized_title_text):
             return True
-        if roman_title_pattern.match(normalized_title_text):
-            return True
-        return False
+        return bool(roman_title_pattern.match(normalized_title_text))
 
     def _read_para_tag(
         self,
@@ -404,7 +415,7 @@ class SectionExtractor:
 
         # If there is a section tag then extract sections using the standard XML structure method
         if any(child.name == "section" for child in children):
-            text_split_by_sections = self._extract_text_sections_standard_format(
+            text_split_by_sections = self._extract_full_text_sections_standard_format(
                 children
             )
             logger.info(

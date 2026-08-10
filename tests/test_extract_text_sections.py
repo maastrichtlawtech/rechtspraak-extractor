@@ -45,6 +45,35 @@ _test_xml_section_role_and_title = b"""\
     </uitspraak>
 """
 
+_test_xml_unnested_sections = b"""\
+    <uitspraak id="test:id:nested">
+        <section>
+            <title> Section 1</title>
+            <para>Section 1 body.</para>
+        </section>
+        <section>
+            <title> Section 2</title>
+            <para>Section 2 body.</para>
+        </section>
+    </uitspraak>
+"""
+
+_test_xml_nested_sections = b"""\
+    <uitspraak id="test:id:nested">
+        <section>
+            <title>Parent</title>
+            <para>Parent body.</para>
+            <section>
+                <title>Child</title>
+                <para>Child body.</para>
+                <section role="grandchild">
+                    <para>Grandchild body.</para>
+                </section>
+            </section>
+        </section>
+    </uitspraak>
+"""
+
 _test_xml_standard_format = b"""\
     <uitspraak id="test:id:1">
         <uitspraak.info>
@@ -76,22 +105,6 @@ _test_xml_standard_format = b"""\
         <section>
             <title>Beslissing </title>
             <para>2. Decision II.</para>
-        </section>
-    </uitspraak>
-"""
-
-_test_xml_nested_sections = b"""\
-    <uitspraak id="test:id:nested">
-        <section>
-            <title>Parent</title>
-            <para>Parent body.</para>
-            <section>
-                <title>Child</title>
-                <para>Child body.</para>
-                <section role="grandchild">
-                    <para>Grandchild body.</para>
-                </section>
-            </section>
         </section>
     </uitspraak>
 """
@@ -190,7 +203,7 @@ def test_get_section_title(section_extractor, xml, expected_title):
         ("1. Title text with number 2", "title text with number 2"),
     ],
 )
-def test_clean_title(section_extractor, raw_title_text, expected_clean_title_text):
+def test_clean_title_text(section_extractor, raw_title_text, expected_clean_title_text):
     """
     Test the _clean_title_text method to ensure it correctly cleans and normalizes title text.
     """
@@ -228,6 +241,48 @@ def test_add_line(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "xml, expected_sections",
+    [
+        (
+            _test_xml_unnested_sections,
+            {
+                "section 1": ["Section 1 body."],
+                "section 2": ["Section 2 body."],
+            },
+        ),
+        (
+            _test_xml_nested_sections,
+            {
+                "parent": ["Parent body."],
+                "child": ["Child body."],
+                "grandchild": ["Grandchild body."],
+            },
+        ),
+    ],
+)
+def test_extract_standard_section(
+    section_extractor,
+    xml,
+    expected_sections,
+):
+    """
+    Test the _extract_text_sections_standard_format method to ensure it correctly extracts sections in standard format.
+    It should handle both unnested and nested sections.
+    """
+    # Start with an empty section_titles_text dictionary.
+    section_titles_text: dict[str, list[str]] = {}
+    # Get the top-level children of the <uitspraak> node
+    uitspraak_children = return_uitspraak_node_children(xml)
+
+    # Loop through each section tag similar to how the method would be called in the actual extraction process
+    for section_tag in uitspraak_children:
+        section_extractor._extract_standard_section(section_tag, section_titles_text)
+
+    assert section_titles_text == expected_sections
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     ("xml", "expected_keys", "expected_values"),
     [
         (
@@ -249,37 +304,21 @@ def test_add_line(
         ),
     ],
 )
-def test_extract_text_sections_standard_format(
+def test_extract_full_text_sections_standard_format(
     section_extractor, xml, expected_keys, expected_values
 ):
     """
     Test the _extract_text_sections_standard_format method with different XML inputs.
     """
     uitspraak_children = return_uitspraak_node_children(xml)
-    sections = section_extractor._extract_text_sections_standard_format(
+    
+    sections = section_extractor._extract_full_text_sections_standard_format(
         uitspraak_children
     )
 
     assert set(sections.keys()) == expected_keys
     for section_name, expected_text in expected_values:
         assert expected_text == sections[section_name]
-
-
-@pytest.mark.unit
-def test_extract_text_sections_standard_format_recurses_without_duplicating_children(
-    section_extractor,
-):
-    uitspraak_children = return_uitspraak_node_children(_test_xml_nested_sections)
-
-    sections = section_extractor._extract_text_sections_standard_format(
-        uitspraak_children
-    )
-
-    assert sections == {
-        "parent": "Parent body.",
-        "child": "Child body.",
-        "grandchild": "Grandchild body.",
-    }
 
 
 @pytest.mark.unit
