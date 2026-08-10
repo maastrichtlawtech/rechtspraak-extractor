@@ -118,7 +118,7 @@ _test_xml_short_numbered_sentences = b"""\
                 <para>Voor een proceskostenveroordeling bestaat geen aanleiding.</para>
             </parablock>
         </uitspraak>
-    """
+"""
 
 _test_xml_no_section_titles = b"""\
     <uitspraak id="test:id:2">
