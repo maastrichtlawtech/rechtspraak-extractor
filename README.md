@@ -46,7 +46,7 @@ Python 3.9+
     </td>
     <td align="center">
         <a href="https://github.com/sha-sub">
-            <img src="https://avatars.githubusercontent.com/u/299564450?v=4" width="100;" alt="gijsvd"/>
+            <img src="https://avatars.githubusercontent.com/u/299564450?v=4" width="100;" alt="sha-sub"/>
             <br />
             <sub><b>Shashank Subramanya</b></sub>
         </a>
@@ -71,7 +71,7 @@ Python 3.9+
     inhoudsindicatie, and vindplaatsen.
     <br>Supports two extraction methods: <code>method='api'</code> (default, fetches live from Rechtspraak API)
     and <code>method='sqlite'</code> (fetches from a local pre-built SQLite database — see below).
-    <br>For <code>method='api'</code> supports case text (uitspraak) extraction split by sections or as a single block.
+    <br>The <code>method='api'</code> supports case text (uitspraak) extraction split by sections or as a single block.
     <li><code>fetch_eclis_via_sqlite</code></li>
     Low-level function to look up a list of ECLIs directly from a local SQLite database and return a DataFrame.
     Requires the <code>rechtspraak-lido-sqlite</code> package to be installed and its database populated first
