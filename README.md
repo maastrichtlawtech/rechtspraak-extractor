@@ -44,6 +44,13 @@ Python 3.9+
             <sub><b>gijsvd</b></sub>
         </a>
     </td>
+    <td align="center">
+        <a href="https://github.com/sha-sub">
+            <img src="https://avatars.githubusercontent.com/u/299564450?v=4" width="100;" alt="sha-sub"/>
+            <br />
+            <sub><b>Shashank Subramanya</b></sub>
+        </a>
+    </td>
 </tr>
 </table>
 <!-- readme: contributors,gijsvd -end -->
@@ -64,6 +71,7 @@ Python 3.9+
     inhoudsindicatie, and vindplaatsen.
     <br>Supports two extraction methods: <code>method='api'</code> (default, fetches live from Rechtspraak API)
     and <code>method='sqlite'</code> (fetches from a local pre-built SQLite database — see below).
+    <br>The <code>method='api'</code> supports case text (uitspraak) extraction split by sections or as a single block.
     <li><code>fetch_eclis_via_sqlite</code></li>
     Low-level function to look up a list of ECLIs directly from a local SQLite database and return a DataFrame.
     Requires the <code>rechtspraak-lido-sqlite</code> package to be installed and its database populated first
@@ -104,6 +112,9 @@ Python 3.9+
         When using <code>method='sqlite'</code>, fall back to the live API for any ECLIs not found in the database
         <li><strong>multi_threading: bool, default True</strong></li>
         Use multi-threading for API-based metadata extraction. Set to False for single-threaded execution
+        <li><strong>extract_text_by_sections: ['y', 'n'], default 'n'</strong></li>
+        y - Extract case text (uitspraak) split by sections. Applicable only for <code>method='api'</code>
+        <br>n - Extract case text as a single block.
     </ul>
     <li><strong>fetch_eclis_via_sqlite(ecli_list, sqlite_db_path, columns)</strong></li>
     <ul>
@@ -143,6 +154,9 @@ rex.get_rechtspraak_metadata(save_file="y", dataframe=df)
 
 # Produce metadata CSV from files already in data/ (processes all files)
 rex.get_rechtspraak_metadata(save_file="y")
+
+# Get metadata into a DataFrame from an existing DataFrame with case text split by sections
+df_metadata = rex.get_rechtspraak_metadata(save_file="n", dataframe=df, extract_text_by_sections="y")
 ```
 
 - `filename` refers to a file in the `data/` folder created by `get_rechtspraak`.
