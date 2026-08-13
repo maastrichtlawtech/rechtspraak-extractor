@@ -148,9 +148,7 @@ class SectionExtractor:
         current_title = self._clean_title_text(self._get_section_title(section_tag))
         section_titles_text_lines.setdefault(current_title, [])
         # Get the section text
-        section_text = BeautifulSoup(str(section_tag), features="xml").find(
-            "section"
-        )
+        section_text = BeautifulSoup(str(section_tag), features="xml").find("section")
 
         if section_text is not None:
             # Remove the <title> tag from the section text to avoid duplication in the body text
@@ -160,14 +158,10 @@ class SectionExtractor:
 
             # Child sections are extracted separately and must not be duplicated in
             # the parent section's body.
-            for nested_section in section_text.find_all(
-                "section", recursive=False
-            ):
+            for nested_section in section_text.find_all("section", recursive=False):
                 nested_section.decompose()
 
-            body_text = self._normalize_xml_text(
-                section_text.get_text(" ", strip=True)
-            )
+            body_text = self._normalize_xml_text(section_text.get_text(" ", strip=True))
             self._add_line(section_titles_text_lines, current_title, body_text)
 
         # Recursively extract text from any nested <section> tags within the current section
@@ -358,7 +352,9 @@ class SectionExtractor:
                     fallback_text = self._normalize_xml_text(
                         child.get_text(" ", strip=True)
                     )
-                    self._add_line(section_titles_text_lines, current_title, fallback_text)
+                    self._add_line(
+                        section_titles_text_lines, current_title, fallback_text
+                    )
 
         # After processing all children, join the lines for each section and normalize the text before returning the final dictionary
         return {
@@ -428,7 +424,9 @@ class SectionExtractor:
             )
         # If there is no section tag, use the rule-based extraction method
         elif any(child.name in ["parablock", "para"] for child in children):
-            text_split_by_sections = self._extract_full_text_sections_rule_based(children)
+            text_split_by_sections = self._extract_full_text_sections_rule_based(
+                children
+            )
             logger.info(
                 "Sections extracted from full text using the rule-based extraction method."
             )

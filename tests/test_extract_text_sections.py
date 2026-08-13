@@ -310,10 +310,10 @@ def test_extract_standard_section(
     ("xml", "expected_keys", "expected_values"),
     [
         # Test case with no data, expecting empty sections
-        (_test_xml_no_data, set(), []),  
+        (_test_xml_no_data, set(), []),
         # Test case with standard format XML, expecting specific section keys and values
         (
-            _test_xml_standard_format,  
+            _test_xml_standard_format,
             {"uitspraak.info", "procesverloop", "beslissing"},
             [
                 ("uitspraak.info", "uitspraak College van Beroep zaaknummer: 14/803"),
@@ -333,7 +333,7 @@ def test_extract_full_text_sections_standard_format(
     Test the _extract_full_text_sections_standard_format method with different XML inputs.
     """
     uitspraak_children = return_uitspraak_node_children(xml)
-    
+
     sections = section_extractor._extract_full_text_sections_standard_format(
         uitspraak_children
     )
@@ -378,10 +378,10 @@ def test_match_title_candidate(section_extractor, text, expected_result):
         ("Title:", True),
         # Known titles are matched with any numeric prefix
         ("2.3 This is a known title", True),
-        # Subsections are not title candidates unless they match known titles 
-        ("2.3 Subsection not a title", False),  
+        # Subsections are not title candidates unless they match known titles
+        ("2.3 Subsection not a title", False),
         # Ends with a period and not a known title
-        ("9. Het beroep is ongegrond.", False),  
+        ("9. Het beroep is ongegrond.", False),
         (
             "A very long sentence that should not be treated as a title because it has too many words",
             False,
@@ -473,7 +473,10 @@ def test_read_para_tag(
             {"gronden", "proceskosten"},
             [
                 ("gronden", "9. Het beroep is ongegrond."),
-                ("proceskosten", "Voor een proceskostenveroordeling bestaat geen aanleiding."),
+                (
+                    "proceskosten",
+                    "Voor een proceskostenveroordeling bestaat geen aanleiding.",
+                ),
             ],
         ),
         # Test case with no section titles, but can be extracted using rule-based extraction
@@ -495,7 +498,9 @@ def test_extract_full_text_sections_rule_based(
     Test the _extract_full_text_sections_rule_based method with different XML inputs.
     """
     uitspraak_children = return_uitspraak_node_children(xml)
-    sections = section_extractor._extract_full_text_sections_rule_based(uitspraak_children)
+    sections = section_extractor._extract_full_text_sections_rule_based(
+        uitspraak_children
+    )
 
     assert set(sections.keys()) == expected_keys
     for section_name, expected_text in expected_values:
