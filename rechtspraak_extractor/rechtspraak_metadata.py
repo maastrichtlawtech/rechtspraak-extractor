@@ -78,7 +78,10 @@ METADATA_FIELD_MAPPING = {
     "citations_outgoing": "dcterms:relation",
     "procedure": "psi:procedure",
     "hasVersion": "dcterms:hasVersion",
-    "full_text": "uitspraak",
+    # The "full_text" field is mapped to both "uitspraak" and "conclusie" tags.
+    # Some cases have the main text in "conclusie" instead of "uitspraak", such as in ECLI:NL:PHR:2020:937
+    # If a case text contains both, the first matching tag will be used to begin full text extraction
+    "full_text": ("uitspraak", "conclusie"),
     "inhoudsindicatie": "inhoudsindicatie",
     "info": "dcterms:description",
     "language": "dcterms:language",
