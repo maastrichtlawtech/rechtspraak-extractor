@@ -352,11 +352,13 @@ class SectionExtractor:
                 )
 
             else:
-                # For any other child elements, treat their text as fallback text
-                fallback_text = self._normalize_xml_text(
-                    child.get_text(" ", strip=True)
-                )
-                self._add_line(section_titles_text_lines, current_title, fallback_text)
+                # For any other child elements that are not footnotes, treat their text as fallback text
+                # Footnotes contain additional information which is not part of the main case text
+                if child.name != "footnote":
+                    fallback_text = self._normalize_xml_text(
+                        child.get_text(" ", strip=True)
+                    )
+                    self._add_line(section_titles_text_lines, current_title, fallback_text)
 
         # After processing all children, join the lines for each section and normalize the text before returning the final dictionary
         return {
@@ -392,13 +394,16 @@ class SectionExtractor:
         logger.info(
             "Starting text extraction by sections from the parsed XML document using SectionExtractor."
         )
-        # Find the <uitspraak> node in the XML document which contains the information and case text
+        # Find the root node in the XML document which contains the case information and case text
+        # It is most often <uitspraak> or occasionally <conclusie>
         uitspraak_node = self.soup_parsed_xml.find("uitspraak")
         if uitspraak_node is None:
-            logger.warning(
-                "No <uitspraak> node found in the XML document. Returning empty text."
-            )
-            return {"full_text": ""}
+            uitspraak_node = self.soup_parsed_xml.find("conclusie")
+            if uitspraak_node is None:
+                logger.warning(
+                    "No <uitspraak> or <conclusie> node found in the XML document. Returning empty text."
+                )
+                return {"full_text": ""}
 
         # Check the children of the <uitspraak> node to determine if it has a standard structure or if rule-based extraction is needed
         children = [

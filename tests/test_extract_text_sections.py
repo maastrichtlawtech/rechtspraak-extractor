@@ -46,7 +46,7 @@ _test_xml_section_role_and_title = b"""\
 """
 
 _test_xml_unnested_sections = b"""\
-    <uitspraak id="test:id:nested">
+    <uitspraak id="test:id:4">
         <section>
             <title> Section 1</title>
             <para>Section 1 body.</para>
@@ -59,7 +59,7 @@ _test_xml_unnested_sections = b"""\
 """
 
 _test_xml_nested_sections = b"""\
-    <uitspraak id="test:id:nested">
+    <uitspraak id="test:id:5">
         <section>
             <title>Parent</title>
             <para>Parent body.</para>
@@ -75,7 +75,7 @@ _test_xml_nested_sections = b"""\
 """
 
 _test_xml_standard_format = b"""\
-    <uitspraak id="test:id:1">
+    <uitspraak id="test:id:6">
         <uitspraak.info>
             <para>uitspraak </para>
             <para />
@@ -110,7 +110,7 @@ _test_xml_standard_format = b"""\
 """
 
 _test_xml_short_numbered_sentences = b"""\
-        <uitspraak>
+        <uitspraak id="test:id:7">
             <parablock>
                 <para>gronden:</para>
                 <para>9. Het beroep is ongegrond.</para>
@@ -120,8 +120,18 @@ _test_xml_short_numbered_sentences = b"""\
         </uitspraak>
 """
 
+_test_xml_uitspraak_in_conclusie_node = b"""\
+        <conclusie id="test:id:8">
+            <parablock>
+                <para>Title:</para>
+                <para>Body text.</para>
+            </parablock>
+        </conclusie>
+"""
+
+
 _test_xml_no_section_titles = b"""\
-    <uitspraak id="test:id:2">
+    <uitspraak id="test:id:9">
         <para>College van Beroep voor</para>
     <parablock>
       <para>1.	De procedure</para>
@@ -136,6 +146,9 @@ _test_xml_no_section_titles = b"""\
       <para>2.	Beslissing</para>
       <para>2.1	The decision is</para>
     </parablock>
+    <footnote>
+        <para>Footnote text, to be ignored.</para>
+    </footnote>
 </uitspraak>
 """
 
@@ -514,6 +527,7 @@ def test_has_meaningful_sections(section_extractor):
         (_test_xml_no_uitspraak_node, "None"),
         (_test_xml_standard_format, "Sections_Standard_Format"),
         (_test_xml_no_section_titles, "Sections_Rule_Based"),
+        (_test_xml_uitspraak_in_conclusie_node, "Sections_Conclusie_Node_Rule_Based"),
         (_test_xml_no_data, "Full_Text"),
     ],
 )
@@ -534,7 +548,9 @@ def test_extract_text_sections(
         "context": "Context text.",
         "beslissing": "2.1 The decision is",
     }
-
+    expected_text_case_in_conclusie_node = {
+        "title": "Body text.",
+    }
     # Provide the raw XML file in a parsed form to the SectionExtractor instance
     section_extractor.soup_parsed_xml = BeautifulSoup(xml, features="xml")
     # Extract text by sections and test the logging output for the extraction process
@@ -544,7 +560,7 @@ def test_extract_text_sections(
     if expected_extraction_mode == "None":
         assert text_extracted == {"full_text": ""}
         assert (
-            "No <uitspraak> node found in the XML document. Returning empty text."
+            "No <uitspraak> or <conclusie> node found in the XML document. Returning empty text."
             in caplog.text
         )
         return
@@ -556,6 +572,12 @@ def test_extract_text_sections(
         )
     elif expected_extraction_mode == "Sections_Rule_Based":
         assert text_extracted == expected_text_rule_based
+        assert (
+            "Sections extracted from full text using the rule-based extraction method."
+            in caplog.text
+        )
+    elif expected_extraction_mode == "Sections_Conclusie_Node_Rule_Based":
+        assert text_extracted == expected_text_case_in_conclusie_node
         assert (
             "Sections extracted from full text using the rule-based extraction method."
             in caplog.text
