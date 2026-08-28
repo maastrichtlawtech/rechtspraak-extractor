@@ -390,9 +390,7 @@ class SectionExtractor:
         Returns:
             A dictionary where keys are section titles and values are the corresponding text content.
         """
-        logger.info(
-            f"Section extraction started for {self.ecli_id}."
-        )
+        logger.info(f"Section extraction started for {self.ecli_id}.")
         # Find the root node in the XML document which contains the case information and case text
         # It is most often <uitspraak> or occasionally <conclusie>
         uitspraak_node = self.soup_parsed_xml.find("uitspraak")
