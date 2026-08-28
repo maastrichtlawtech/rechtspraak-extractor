@@ -181,7 +181,8 @@ def section_extractor() -> SectionExtractor:
     """
     dummy_xml = b"""<test id="dummy:id:1"><para>Dummy text</para></test>"""
     dummy_soup = BeautifulSoup(dummy_xml, features="xml")
-    return SectionExtractor(dummy_soup, _KNOWN_SECTION_TITLES)
+    test_ecli_id = "dummy:id:1"
+    return SectionExtractor(dummy_soup, test_ecli_id, _KNOWN_SECTION_TITLES)
 
 
 @pytest.mark.unit
@@ -565,31 +566,31 @@ def test_extract_text_sections(
     if expected_extraction_mode == "None":
         assert text_extracted == {"full_text": ""}
         assert (
-            "No <uitspraak> or <conclusie> node found in the XML document. Returning empty text."
+            f"Section extraction failed, returning empty text for {section_extractor.ecli_id} reason=no_uitspraak_or_conclusie_node"
             in caplog.text
         )
         return
     elif expected_extraction_mode == "Sections_Standard_Format":
         assert text_extracted == expected_text_standard_format
         assert (
-            "Sections extracted from full text using the standard XML structure method."
+            f"Sections extracted from full text for {section_extractor.ecli_id} method=standard_format_with_sections"
             in caplog.text
         )
     elif expected_extraction_mode == "Sections_Rule_Based":
         assert text_extracted == expected_text_rule_based
         assert (
-            "Sections extracted from full text using the rule-based extraction method."
+            f"Sections extracted from full text for {section_extractor.ecli_id} method=rule_based_extraction"
             in caplog.text
         )
     elif expected_extraction_mode == "Sections_Conclusie_Node_Rule_Based":
         assert text_extracted == expected_text_case_in_conclusie_node
         assert (
-            "Sections extracted from full text using the rule-based extraction method."
+            f"Sections extracted from full text for {section_extractor.ecli_id} method=rule_based_extraction"
             in caplog.text
         )
     else:  # expected_extraction_mode == "Full_Text"
         assert text_extracted == {"full_text": "Test data."}
         assert (
-            "Sections not found. Returning full text as a single section."
+            f"Sections not found, returning full text as a single section for {section_extractor.ecli_id} reason=no_children_in_uitspraak_node"
             in caplog.text
         )

@@ -314,7 +314,7 @@ def process_metadata_fields(
             ):
                 # Extract text split by sections using SectionExtractor
                 logging.info(f"Extracting full text by sections for ECLI {ecli_id}")
-                section_extractor = SectionExtractor(soup, KNOWN_SECTION_TITLES)
+                section_extractor = SectionExtractor(soup, ecli_id, KNOWN_SECTION_TITLES)
                 value = section_extractor.extract_text_sections()
             else:
                 value = get_text_if_exists(element, ecli_id)
