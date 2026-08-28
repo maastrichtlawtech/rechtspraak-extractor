@@ -25,11 +25,13 @@ class SectionExtractor:
     def __init__(
         self,
         soup_parsed_xml: BeautifulSoup,
+        ecli_id: str,
         known_section_titles: Optional[set[str]] = None,
     ) -> None:
         """
         Args:
             soup_parsed_xml: A BeautifulSoup object representing the parsed XML document.
+            ecli_id: The ECLI identifier for logging purposes.
             known_section_titles: Optional set of known section titles used to assist
                 section detection.
         """
@@ -39,6 +41,7 @@ class SectionExtractor:
         self.known_section_titles = {
             self._clean_title_text(title) for title in known_section_titles or set()
         }
+        self.ecli_id = ecli_id
 
     @staticmethod
     def _normalize_xml_text(text: str) -> str:
@@ -387,9 +390,7 @@ class SectionExtractor:
         Returns:
             A dictionary where keys are section titles and values are the corresponding text content.
         """
-        logger.info(
-            "Starting text extraction by sections from the parsed XML document using SectionExtractor."
-        )
+        logger.info(f"Section extraction started for {self.ecli_id}.")
         # Find the root node in the XML document which contains the case information and case text
         # It is most often <uitspraak> or occasionally <conclusie>
         uitspraak_node = self.soup_parsed_xml.find("uitspraak")
@@ -397,7 +398,7 @@ class SectionExtractor:
             uitspraak_node = self.soup_parsed_xml.find("conclusie")
             if uitspraak_node is None:
                 logger.warning(
-                    "No <uitspraak> or <conclusie> node found in the XML document. Returning empty text."
+                    f"Section extraction failed, returning empty text for {self.ecli_id} reason=no_uitspraak_or_conclusie_node"
                 )
                 return {"full_text": ""}
 
@@ -411,7 +412,9 @@ class SectionExtractor:
             full_text = self._normalize_xml_text(
                 uitspraak_node.get_text(" ", strip=True)
             )
-            logger.info("Sections not found. Returning full text as a single section.")
+            logger.info(
+                f"Sections not found, returning full text as a single section for {self.ecli_id} reason=no_children_in_uitspraak_node"
+            )
             return {"full_text": full_text}
 
         # If there is a section tag then extract sections using the standard XML structure method
@@ -420,7 +423,7 @@ class SectionExtractor:
                 children
             )
             logger.info(
-                "Sections extracted from full text using the standard XML structure method."
+                f"Sections extracted from full text for {self.ecli_id} method=standard_format_with_sections"
             )
         # If there is no section tag, use the rule-based extraction method
         elif any(child.name in ["parablock", "para"] for child in children):
@@ -428,14 +431,16 @@ class SectionExtractor:
                 children
             )
             logger.info(
-                "Sections extracted from full text using the rule-based extraction method."
+                f"Sections extracted from full text for {self.ecli_id} method=rule_based_extraction"
             )
         # If none of the above conditions are met, return the full text of the <uitspraak> node as a single section
         else:
             full_text = self._normalize_xml_text(
                 uitspraak_node.get_text(" ", strip=True)
             )
-            logger.info("Sections not found. Returning full text as a single section.")
+            logger.info(
+                f"Sections not found, returning full text as a single section for {self.ecli_id} reason=uitspraak_node_has_no_section_tags_or_para_structure"
+            )
             return {"full_text": full_text}
 
         # If no sections or only the uitspraak.info was extracted using the standard XML structure method or rule-based extraction
@@ -446,7 +451,7 @@ class SectionExtractor:
                 uitspraak_node.get_text(" ", strip=True)
             )
             logger.info(
-                "Sections not found or only <uitspraak.info> extracted. Returning full text as a single section."
+                f"Sections not found or only <uitspraak.info> extracted, returning full text as a single section for {self.ecli_id} reason=no_meaningful_sections"
             )
             return {"full_text": full_text}
 
